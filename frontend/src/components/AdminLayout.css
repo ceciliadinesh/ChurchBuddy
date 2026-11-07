@@ -1,0 +1,448 @@
+
+/* =========================================
+   CHERRY BLOSSOM ADMIN THEME 🌸
+========================================= */
+
+:root {
+  --sakura-primary: #e88ba9;
+  --sakura-secondary: #f6b8ca;
+  --sakura-light: #fff0f5;
+  --sakura-pale: #fff8fa;
+  --sakura-dark: #744356;
+  --sakura-text: #533b48;
+  --sakura-muted: #a58b99;
+  --sakura-border: rgba(232, 139, 169, 0.17);
+  --sakura-shadow: 0 12px 40px rgba(173, 105, 132, 0.09);
+}
+
+/* Main shell */
+
+.admin-shell {
+  min-height: 100vh;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  color: var(--sakura-text);
+  background: white;
+}
+
+/* Main content */
+
+.admin-main {
+  min-width: 0;
+  flex: 1;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+/* =========================================
+   TOPBAR
+========================================= */
+
+.admin-topbar {
+  height: 88px;
+  margin: 18px 24px 0;
+  padding: 0 30px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  background: rgba(255, 255, 255, 0.74);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 22px;
+
+  box-shadow: var(--sakura-shadow);
+  position: relative;
+  z-index: 5;
+}
+
+.topbar-left,
+.topbar-right {
+  display: flex;
+  align-items: center;
+}
+
+.topbar-left {
+  gap: 16px;
+}
+
+.welcome-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+
+  display: grid;
+  place-items: center;
+
+  color: #d66e94;
+  background: linear-gradient(135deg, #ffe2eb, #fff1f5);
+  box-shadow: 0 5px 15px rgba(220, 133, 164, 0.15);
+}
+
+.topbar-welcome {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #624252;
+  letter-spacing: -0.4px;
+}
+
+.topbar-welcome span {
+  color: #dc789c;
+}
+
+.topbar-subtitle {
+  margin: 5px 0 0;
+  color: #a58b99;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Right side */
+
+.topbar-right {
+  gap: 17px;
+}
+
+.topbar-icon-button {
+  width: 42px;
+  height: 42px;
+  border: 1px solid #f7e6ec;
+  background: #fffafd;
+  color: #a96d86;
+  border-radius: 14px;
+
+  display: grid;
+  place-items: center;
+
+  cursor: pointer;
+  transition: all 0.25s ease;
+  position: relative;
+}
+
+.topbar-icon-button:hover {
+  color: white;
+  background: #e88ba9;
+  border-color: #e88ba9;
+  transform: translateY(-3px);
+  box-shadow: 0 8px 18px rgba(232, 139, 169, 0.25);
+}
+
+.notification-dot {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  height: 7px;
+  width: 7px;
+  background: #e56b92;
+  border-radius: 50%;
+  border: 1.5px solid white;
+}
+
+.topbar-divider {
+  height: 36px;
+  width: 1px;
+  background: #f3e1e8;
+}
+
+.admin-profile {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.admin-avatar {
+  position: relative;
+  width: 43px;
+  height: 43px;
+  border-radius: 15px;
+
+  display: grid;
+  place-items: center;
+
+  color: white;
+  font-size: 17px;
+  font-weight: 700;
+
+  background: linear-gradient(135deg, #ed9ab5, #c76c91);
+  box-shadow: 0 5px 15px rgba(202, 109, 145, 0.25);
+}
+
+.avatar-status {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #8bc9a5;
+  border: 2px solid white;
+}
+
+.profile-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.profile-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #69485a;
+}
+
+.profile-role {
+  font-size: 11px;
+  color: #ae8e9e;
+}
+
+.profile-chevron {
+  color: #ae8e9e;
+}
+
+/* =========================================
+   CONTENT
+========================================= */
+
+.admin-content {
+  position: relative;
+  min-height: calc(100vh - 106px);
+  padding: 28px 30px 15px;
+}
+
+.content-inner {
+  position: relative;
+  z-index: 1;
+  animation: contentReveal 0.65s ease both;
+}
+
+.content-decoration {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin: 4px auto 23px;
+
+  color: #c18ba1;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.7px;
+}
+
+.content-decoration svg {
+  color: #e99bb5;
+}
+
+.admin-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 5px 5px;
+
+  font-size: 11px;
+  color: #b49aa7;
+}
+
+/* =========================================
+   FLOATING SAKURA PETALS 🌸
+========================================= */
+
+.sakura-layer {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.sakura-petal {
+  position: absolute;
+  top: -30px;
+  width: 13px;
+  height: 18px;
+
+  background: linear-gradient(
+    135deg,
+    #ffd8e5,
+    #f3a9c0
+  );
+
+  border-radius: 80% 10% 80% 10%;
+  opacity: 0.65;
+
+  animation: sakuraFall linear infinite;
+  filter: drop-shadow(0 2px 3px rgba(219, 129, 161, 0.15));
+}
+
+.petal-1 {
+  width: 10px;
+  height: 15px;
+}
+
+.petal-2 {
+  width: 15px;
+  height: 20px;
+  opacity: 0.4;
+}
+
+.petal-3 {
+  width: 9px;
+  height: 13px;
+  background: #f8b6cb;
+}
+
+.petal-4 {
+  width: 17px;
+  height: 22px;
+  opacity: 0.35;
+}
+
+.petal-5 {
+  width: 12px;
+  height: 16px;
+  background: #ffe0e9;
+}
+
+.petal-6 {
+  width: 8px;
+  height: 12px;
+}
+
+@keyframes sakuraFall {
+  0% {
+    transform: translate3d(0, -5vh, 0) rotate(0deg);
+  }
+
+  25% {
+    transform: translate3d(35px, 25vh, 0) rotate(100deg);
+  }
+
+  50% {
+    transform: translate3d(-30px, 50vh, 0) rotate(200deg);
+  }
+
+  75% {
+    transform: translate3d(35px, 75vh, 0) rotate(290deg);
+  }
+
+  100% {
+    transform: translate3d(-20px, 110vh, 0) rotate(420deg);
+  }
+}
+
+/* =========================================
+   ANIMATIONS
+========================================= */
+
+@keyframes contentReveal {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* =========================================
+   MOBILE
+========================================= */
+
+.mobile-menu-button {
+  display: none;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #f4dce5;
+  border-radius: 13px;
+  background: #fff4f8;
+  color: #bd6c8b;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .admin-topbar {
+    margin: 12px 14px 0;
+    padding: 0 17px;
+  }
+
+  .admin-content {
+    padding: 24px 17px 15px;
+  }
+
+  .mobile-menu-button {
+    display: grid;
+    place-items: center;
+  }
+
+  .welcome-icon {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .admin-topbar {
+    height: 76px;
+    border-radius: 17px;
+  }
+
+  .topbar-welcome {
+    font-size: 14px;
+  }
+
+  .topbar-subtitle {
+    font-size: 10px;
+  }
+
+  .topbar-right {
+    gap: 8px;
+  }
+
+  .search-button,
+  .profile-info,
+  .profile-chevron,
+  .topbar-divider {
+    display: none;
+  }
+
+  .topbar-icon-button {
+    width: 36px;
+    height: 36px;
+  }
+
+  .admin-avatar {
+    width: 38px;
+    height: 38px;
+  }
+
+  .content-decoration {
+    font-size: 9px;
+    text-align: center;
+  }
+
+  .admin-footer {
+    flex-direction: column;
+    gap: 8px;
+    text-align: center;
+  }
+}
+
+/* Accessibility */
+
+@media (prefers-reduced-motion: reduce) {
+  .sakura-petal,
+  .content-inner {
+    animation: none !important;
+  }
+}

@@ -1,0 +1,2115 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+    CalendarDays,
+    WandSparkles,
+    RefreshCw,
+    Lock,
+    LockOpen,
+    Plus,
+    X,
+    Download,
+    FileText,
+    Pencil,
+    Trash2,
+    UsersRound,
+    CheckCircle2,
+    CircleAlert,
+    Copy,
+} from "lucide-react";
+
+const API_URL =
+    import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
+const ROSTER_SLOTS = ["7:00 AM", "7:30 AM", "9:45 AM", "6:00 PM"];
+
+const READING_ORDER = ["Ang.", "Rdng.1", "Rdng.2", "P.S.", "POF"];
+
+const RESPONSIBILITY_ORDER = { Angelus: 1, Reading: 2, POF: 3 };
+
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+// --------------------------------------------------
+// GENERAL HELPERS
+// --------------------------------------------------
+
+function getList(data) {
+    return Array.isArray(data) ? data : data?.items || [];
+}
+
+function getLectorName(lector, lectorId) {
+    if (!lector) {
+        return lectorId != null ? `Lector #${lectorId}` : "Unassigned";
+    }
+
+    const firstName = lector.first_name || lector.firstname || "";
+    const lastName = lector.last_name || lector.lastname || "";
+    const combined = `${firstName} ${lastName}`.trim();
+
+    return (
+        lector.full_name ||
+        lector.name ||
+        combined ||
+        lector.email ||
+        `Lector #${lectorId}`
+    );
+}
+
+function getAssignmentName(item) {
+    return item.lector_name || getLectorName(item.lector, item.lector_id);
+}
+
+function getMassTime(item) {
+    return (
+        item.mass_slot?.mass_time ||
+        item.mass_slot?.time ||
+        item.mass_time ||
+        item.slot_time ||
+        ""
+    );
+}
+
+// Accepts "6:00 PM", "06:00 PM", "18:00", "18:00:00"
+function parseMassTime(value) {
+    const raw = String(value || "").trim().toUpperCase();
+    const match = raw.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/);
+    if (!match) return null;
+
+    let hour = Number(match[1]);
+    const minute = Number(match[2]);
+
+    if (match[3] === "PM" && hour < 12) hour += 12;
+    if (match[3] === "AM" && hour === 12) hour = 0;
+
+    return { hour, minute };
+}
+
+function getMassMinutes(item) {
+    const t = parseMassTime(getMassTime(item));
+    return t ? t.hour * 60 + t.minute : 0;
+}
+
+function formatMassTime(value) {
+    if (!value) return "Time unavailable";
+
+    const t = parseMassTime(value);
+    if (!t) return value;
+
+    const period = t.hour >= 12 ? "PM" : "AM";
+    const displayHour = t.hour % 12 || 12;
+
+    return `${displayHour}:${String(t.minute).padStart(2, "0")} ${period}`;
+}
+
+function getReadingLabel(item) {
+    if (item.responsibility === "Reading" && item.position_number) {
+        return `Rdng.${item.position_number}`;
+    }
+
+    const value = String(
+        item.reading ||
+        item.reading_type ||
+        item.responsibility ||
+        item.position_name ||
+        item.position ||
+        ""
+    ).trim();
+
+    if (!value) return "";
+
+    const normalized = value.toLowerCase().replace(/\s+/g, "");
+
+    const aliases = {
+        ang: "Ang.",
+        angelus: "Ang.",
+        "rdng.1": "Rdng.1",
+        reading1: "Rdng.1",
+        "rdng.2": "Rdng.2",
+        reading2: "Rdng.2",
+        ps: "P.S.",
+        "p.s.": "P.S.",
+        pof: "POF",
+    };
+
+    return aliases[normalized] || value;
+}
+
+function formatRosterDate(dateValue) {
+    if (!dateValue) {
+        return { date: "", day: "" };
+    }
+
+    const date = new Date(`${String(dateValue).slice(0, 10)}T12:00:00`);
+
+    if (Number.isNaN(date.getTime())) {
+        return { date: String(dateValue), day: "" };
+    }
+
+    return {
+        date: date
+            .toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+            })
+            .toUpperCase(),
+
+        day: date
+            .toLocaleDateString("en-US", {
+                weekday: "short",
+            })
+            .toUpperCase(),
+    };
+}
+
+function escapeHtml(value) {
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function getDateOnly(value) {
+    return String(value || "").slice(0, 10);
+}
+
+// Copies text to the clipboard, with a fallback for non-HTTPS / older browsers
+async function copyText(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+    }
+}
+
+// --------------------------------------------------
+// DOWNLOAD ROSTER GROUPING
+// --------------------------------------------------
+
+function getRosterSlotIndex(item) {
+    const t = parseMassTime(getMassTime(item));
+    if (!t) return -1;
+
+    const key = `${t.hour}:${String(t.minute).padStart(2, "0")}`;
+
+    const map = {
+        "7:00": 0,
+        "7:30": 1,
+        "9:45": 2,
+        "18:00": 3,
+    };
+
+    return key in map ? map[key] : -1;
+}
+
+function buildRosterGroups(assignments) {
+    const byDate = new Map();
+
+    assignments.forEach((item) => {
+        const date = getDateOnly(item.assignment_date || item.date);
+
+        if (!date) return;
+
+        if (!byDate.has(date)) {
+            byDate.set(date, []);
+        }
+
+        byDate.get(date).push(item);
+    });
+
+    return [...byDate.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([dateValue, items]) => {
+            const slotItems = [[], [], [], []];
+            const readingLabels = new Set();
+
+            items.forEach((item) => {
+                const label = getReadingLabel(item);
+
+                if (label) {
+                    readingLabels.add(label);
+                }
+
+                const slot = getRosterSlotIndex(item);
+
+                if (slot >= 0) {
+                    slotItems[slot].push(item);
+                }
+            });
+
+            const labels = [...readingLabels].sort((a, b) => {
+                const ai = READING_ORDER.indexOf(a);
+                const bi = READING_ORDER.indexOf(b);
+
+                if (ai === -1 && bi === -1) return a.localeCompare(b);
+                if (ai === -1) return 1;
+                if (bi === -1) return -1;
+
+                return ai - bi;
+            });
+
+            // One row per reading, each name placed on its own reading row.
+            const rows =
+                labels.length > 0
+                    ? labels.map((label) => ({
+                        reading: label,
+                        slots: slotItems.map((slot) =>
+                            slot
+                                .filter(
+                                    (item) =>
+                                        getReadingLabel(item) === label &&
+                                        item.lector_id != null
+                                )
+                                .map(getAssignmentName)
+                                .join(", ")
+                        ),
+                    }))
+                    : [{ reading: "", slots: ["", "", "", ""] }];
+
+            // Masses whose time is not one of the four roster columns.
+            const unknownSlotItems = items.filter(
+                (item) => getRosterSlotIndex(item) < 0
+            );
+
+            unknownSlotItems.forEach((item, index) => {
+                const rowIndex = index % rows.length;
+
+                const extra = [
+                    formatMassTime(getMassTime(item)),
+                    getReadingLabel(item),
+                    item.lector_id != null ? getAssignmentName(item) : "",
+                ]
+                    .filter(Boolean)
+                    .join(" — ");
+
+                rows[rowIndex].slots[0] = [rows[rowIndex].slots[0], extra]
+                    .filter(Boolean)
+                    .join("; ");
+            });
+
+            return {
+                dateValue,
+                ...formatRosterDate(dateValue),
+                rows,
+            };
+        });
+}
+
+// --------------------------------------------------
+// DOWNLOAD DOCUMENT
+// --------------------------------------------------
+
+function buildRosterDocument(form, assignments) {
+    const groups = buildRosterGroups(assignments);
+
+    const monthYear =
+        form?.title ||
+        (form?.month && form?.year
+            ? `${new Date(
+                Number(form.year),
+                Number(form.month) - 1,
+                1
+            ).toLocaleDateString("en-US", {
+                month: "long",
+            })} ${form.year}`
+            : "MONTH YEAR");
+
+    const bodyRows = groups
+        .map((group) =>
+            group.rows
+                .map(
+                    (row, index) => `
+      <tr class="${index === 0 ? "date-start" : ""}">
+        ${index === 0
+                            ? `
+              <td class="date" rowspan="${group.rows.length}">
+                ${escapeHtml(group.date)}
+              </td>
+              <td class="day" rowspan="${group.rows.length}">
+                ${escapeHtml(group.day)}
+              </td>
+            `
+                            : ""
+                        }
+
+        <td class="reading">
+          ${escapeHtml(row.reading)}
+        </td>
+
+        ${row.slots
+                            .map((name) => {
+                                const special =
+                                    /community|school|liturgy team|youth|sodality/i.test(
+                                        name
+                                    );
+
+                                return `
+            <td class="${special ? "special" : "person"}">
+              ${escapeHtml(name)}
+            </td>
+          `;
+                            })
+                            .join("")}
+      </tr>
+    `
+                )
+                .join("")
+        )
+        .join("");
+
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Lectors List - ${escapeHtml(monthYear)}</title>
+
+<style>
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    padding: 18px;
+    color: #111;
+    background: #fff;
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  h1 {
+    margin: 0 0 18px;
+    text-align: center;
+    font-size: 21px;
+    font-weight: 700;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 12px;
+    background: #fff;
+  }
+
+  th, td {
+    border: 1px solid #222;
+    padding: 5px 6px;
+    height: 27px;
+    vertical-align: middle;
+  }
+
+  th {
+    background: #dedede;
+    text-align: center;
+    font-weight: 700;
+    border: 2px solid #111;
+  }
+
+  td.date, td.day {
+    text-align: center;
+    vertical-align: middle;
+    background: #f1f1f1;
+  }
+
+  td.reading {
+    text-align: left;
+    width: 8%;
+  }
+
+  td.person {
+    text-align: left;
+    overflow-wrap: anywhere;
+  }
+
+  td.special {
+    text-align: center;
+    font-weight: 700;
+  }
+
+  tr.date-start td {
+    border-top: 2px solid #111;
+  }
+
+  th:nth-child(1) { width: 8%; }
+  th:nth-child(2) { width: 7%; }
+  th:nth-child(3) { width: 8%; }
+
+  th:nth-child(4),
+  th:nth-child(5),
+  th:nth-child(6),
+  th:nth-child(7) {
+    width: 19.25%;
+  }
+
+  @media print {
+    body { padding: 0; }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; }
+  }
+</style>
+</head>
+
+<body>
+<h1>LECTORS LIST FOR ${escapeHtml(monthYear).toUpperCase()}</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Day</th>
+      <th>Readings</th>
+      ${ROSTER_SLOTS.map((slot) => `<th>${slot}</th>`).join("")}
+    </tr>
+  </thead>
+
+  <tbody>
+    ${bodyRows}
+  </tbody>
+</table>
+</body>
+</html>`;
+}
+
+// --------------------------------------------------
+// CALENDAR (MON-SUN GRID)
+// --------------------------------------------------
+
+function buildCalendarWeeks(month, year, assignments) {
+    if (!month || !year) return [];
+
+    const m = Number(month);
+    const y = Number(year);
+    const pad = (n) => String(n).padStart(2, "0");
+
+    const byDate = new Map();
+
+    assignments.forEach((item) => {
+        const d = getDateOnly(item.assignment_date || item.date);
+        if (!d) return;
+        if (!byDate.has(d)) byDate.set(d, []);
+        byDate.get(d).push(item);
+    });
+
+    byDate.forEach((list) =>
+        list.sort((a, b) => {
+            const diff = getMassMinutes(a) - getMassMinutes(b);
+            if (diff !== 0) return diff;
+
+            const ra = RESPONSIBILITY_ORDER[a.responsibility] || 99;
+            const rb = RESPONSIBILITY_ORDER[b.responsibility] || 99;
+            if (ra !== rb) return ra - rb;
+
+            return (a.position_number || 0) - (b.position_number || 0);
+        })
+    );
+
+    const offset = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Monday first
+    const daysInMonth = new Date(y, m, 0).getDate();
+
+    const cells = [
+        ...Array(offset).fill(null),
+        ...Array.from({ length: daysInMonth }, (_, i) => {
+            const dateStr = `${y}-${pad(m)}-${pad(i + 1)}`;
+            return {
+                dateStr,
+                dayNumber: i + 1,
+                items: byDate.get(dateStr) || [],
+            };
+        }),
+    ];
+
+    while (cells.length % 7 !== 0) cells.push(null);
+
+    const weeks = [];
+    for (let i = 0; i < cells.length; i += 7) {
+        weeks.push(cells.slice(i, i + 7));
+    }
+
+    return weeks;
+}
+
+// --------------------------------------------------
+// MAIN COMPONENT
+// --------------------------------------------------
+
+export default function MonthlyScheduling() {
+    const [forms, setForms] = useState([]);
+    const [lectors, setLectors] = useState([]);
+    const [selectedId, setSelectedId] = useState("");
+    const [assignments, setAssignments] = useState([]);
+
+    const [selectedDay, setSelectedDay] = useState(null);
+    const [editingAssignmentId, setEditingAssignmentId] = useState(null);
+    const [manualLectorId, setManualLectorId] = useState("");
+    const [overrideAvailability, setOverrideAvailability] = useState(false);
+
+    const [frozenDates, setFrozenDates] = useState([]);
+    const [dateInput, setDateInput] = useState("");
+    const [freezeDone, setFreezeDone] = useState(false);
+
+    const [loading, setLoading] = useState(true);
+    const [working, setWorking] = useState(false);
+    const [error, setError] = useState("");
+    const [message, setMessage] = useState("");
+
+    const [newMonth, setNewMonth] = useState(
+        String(new Date().getMonth() + 1)
+    );
+    const [newYear, setNewYear] = useState(
+        String(Math.max(2026, new Date().getFullYear()))
+    );
+    const [creatingMonth, setCreatingMonth] = useState(false);
+
+    // ---------------- API ----------------
+
+    function headers() {
+        return {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${sessionStorage.getItem("admin_token")}`,
+        };
+    }
+
+    async function request(path, options = {}) {
+        const response = await fetch(`${API_URL}${path}`, {
+            ...options,
+            headers: { ...headers(), ...options.headers },
+        });
+
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+            let detail = "";
+
+            if (typeof data.detail === "string") {
+                detail = data.detail;
+            } else if (data.detail?.message) {
+                detail = data.detail.message;
+
+                if (Array.isArray(data.detail.warnings)) {
+                    detail += ` ${data.detail.warnings.join(" ")}`;
+                }
+            } else if (Array.isArray(data.detail)) {
+                // FastAPI validation errors
+                detail = data.detail
+                    .map((d) => d.msg || JSON.stringify(d))
+                    .join(" ");
+            }
+
+            const error = new Error(
+                detail || `Request failed (${response.status}).`
+            );
+            error.detail = data.detail;
+            throw error;
+        }
+
+        return data;
+    }
+
+    // ---------------- LOAD ----------------
+
+    async function loadAssignments(id) {
+        if (!id) {
+            setAssignments([]);
+            return;
+        }
+        setAssignments(getList(await request(`/assignments/${id}`)));
+    }
+
+    async function loadFrozenDates(id) {
+        if (!id) {
+            setFrozenDates([]);
+            return;
+        }
+        setFrozenDates(getList(await request(`/frozen-dates/${id}`)));
+    }
+
+    async function loadForms() {
+        setLoading(true);
+        setError("");
+        setMessage("");
+
+        try {
+            const [formData, lectorData] = await Promise.all([
+                request("/monthly-forms/"),
+                request("/lectors/"),
+            ]);
+
+            const formList = getList(formData);
+
+            setForms(formList);
+            setLectors(getList(lectorData));
+
+            if (formList.length === 0) {
+                setSelectedId("");
+                setAssignments([]);
+                setFrozenDates([]);
+                return;
+            }
+
+            const existing = formList.find(
+                (f) => String(f.id) === String(selectedId)
+            );
+
+            const nextId = existing
+                ? String(existing.id)
+                : String(formList[0].id);
+
+            setSelectedId(nextId);
+
+            await Promise.all([
+                loadAssignments(nextId),
+                loadFrozenDates(nextId),
+            ]);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    useEffect(() => {
+        loadForms();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Remember "Done Freezing" per monthly form
+    useEffect(() => {
+        if (!selectedId) {
+            setFreezeDone(false);
+            return;
+        }
+
+        try {
+            setFreezeDone(
+                localStorage.getItem(`freeze_done_${selectedId}`) === "1"
+            );
+        } catch {
+            setFreezeDone(false);
+        }
+    }, [selectedId]);
+
+    function persistFreezeDone(value) {
+        setFreezeDone(value);
+
+        try {
+            if (value) {
+                localStorage.setItem(`freeze_done_${selectedId}`, "1");
+            } else {
+                localStorage.removeItem(`freeze_done_${selectedId}`);
+            }
+        } catch {
+            /* ignore */
+        }
+    }
+
+    function cancelEditing() {
+        setEditingAssignmentId(null);
+        setManualLectorId("");
+        setOverrideAvailability(false);
+    }
+
+    async function selectForm(id) {
+        setSelectedId(id);
+        setMessage("");
+        setError("");
+        setDateInput("");
+        setSelectedDay(null);
+        cancelEditing();
+
+        try {
+            await Promise.all([loadAssignments(id), loadFrozenDates(id)]);
+        } catch (err) {
+            setError(err.message);
+        }
+    }
+
+    // ---------------- GOOGLE FORM ----------------
+
+    // Calls the backend to create the Google Form for a month, then stores
+    // the returned links on that month in local state.
+    async function createGoogleFormFor(id) {
+        const result = await request(`/google-forms/${id}/create`, {
+            method: "POST",
+        });
+
+        if (!result.form_url) {
+            throw new Error(
+                "Google Form was created, but no form URL was returned."
+            );
+        }
+
+        setForms((prev) =>
+            prev.map((f) =>
+                String(f.id) === String(id)
+                    ? {
+                        ...f,
+                        google_form_id: result.google_form_id,
+                        google_form_url: result.form_url,
+                        google_form_edit_url: result.edit_url,
+                    }
+                    : f
+            )
+        );
+
+        return result;
+    }
+
+    // Fallback for months that do not have a Google Form yet
+    async function retryCreateGoogleForm() {
+        if (!selectedId) {
+            setError("Please select a monthly form first.");
+            return;
+        }
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            await createGoogleFormFor(selectedId);
+            setMessage("Google Form created. You can now copy the link.");
+        } catch (err) {
+            setError(err.message || "Could not create the Google Form.");
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    // ---------------- ADD MONTH ----------------
+
+    async function createMonth() {
+        const month = Number(newMonth);
+        const year = Number(newYear);
+
+        if (!Number.isInteger(month) || month < 1 || month > 12) {
+            setError("Please select a valid month.");
+            return;
+        }
+
+        if (!Number.isInteger(year) || year < 2026) {
+            setError("Year must be 2026 or later.");
+            return;
+        }
+
+        const title = new Date(year, month - 1, 1).toLocaleDateString(
+            "en-US",
+            { month: "long", year: "numeric" }
+        );
+
+        setCreatingMonth(true);
+        setError("");
+        setMessage("");
+
+        try {
+            const result = await request("/monthly-forms/", {
+                method: "POST",
+                body: JSON.stringify({
+                    month,
+                    year,
+                    title,
+                    is_open: true,
+                }),
+            });
+
+            const nextId = String(result.id);
+
+            setForms((prev) =>
+                [...prev, result].sort(
+                    (a, b) => b.year - a.year || b.month - a.month
+                )
+            );
+
+            setSelectedId(nextId);
+            setAssignments([]);
+            setFrozenDates([]);
+            setDateInput("");
+            setSelectedDay(null);
+            cancelEditing();
+
+            // Create the Google Form for this new month
+            try {
+                await createGoogleFormFor(nextId);
+                setMessage(
+                    `${title} created and its Google Form is ready. Use “Copy Form Link”.`
+                );
+            } catch (formErr) {
+                setMessage(`${title} monthly form created.`);
+                setError(
+                    `Google Form could not be created: ${formErr.message} Use “Create Google Form” to retry.`
+                );
+            }
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setCreatingMonth(false);
+        }
+    }
+
+    // ---------------- SELECTED FORM ----------------
+
+    const selectedForm = forms.find(
+        (f) => String(f.id) === String(selectedId)
+    );
+
+    // The link comes from the database (saved on the monthly form)
+    const googleFormUrl = selectedForm?.google_form_url || "";
+
+    async function copyGoogleFormLink() {
+        if (!googleFormUrl) return;
+
+        await copyText(googleFormUrl);
+
+        setError("");
+        setMessage(
+            "Google Form link copied! You can now share it with lectors."
+        );
+    }
+
+    const isClosed = Boolean(selectedForm) && !selectedForm.is_open;
+
+    // Scheduling steps unlock only after the form is closed
+    const showScheduling = Boolean(selectedForm) && isClosed;
+
+    // Generate / assign unlock only after "Done Freezing"
+    const scheduleUnlocked = showScheduling && freezeDone;
+
+    function isDateFrozen(dateValue) {
+        const date = getDateOnly(dateValue);
+        return frozenDates.some((i) => getDateOnly(i.frozen_date) === date);
+    }
+
+    const filled = assignments.filter((i) => i.lector_id != null).length;
+    const unfilled = assignments.filter((i) => i.lector_id == null).length;
+
+    const progress =
+        assignments.length > 0
+            ? Math.round((filled / assignments.length) * 100)
+            : 0;
+
+    const calendarWeeks = useMemo(
+        () =>
+            buildCalendarWeeks(
+                selectedForm?.month,
+                selectedForm?.year,
+                assignments
+            ),
+        [selectedForm?.month, selectedForm?.year, assignments]
+    );
+
+    const activeLectors = lectors.filter((l) => l.is_active);
+
+    const selectedDayItems = useMemo(() => {
+        if (!selectedDay) return [];
+
+        for (const week of calendarWeeks) {
+            for (const cell of week) {
+                if (cell && cell.dateStr === selectedDay) {
+                    return cell.items;
+                }
+            }
+        }
+
+        return [];
+    }, [selectedDay, calendarWeeks]);
+
+    // ---------------- CLOSE / REOPEN ----------------
+
+    async function toggleForm(action) {
+        if (!selectedId) return;
+
+        const text =
+            action === "close"
+                ? "Close this monthly form? Scheduling tools will open after this."
+                : "Reopen this monthly form? Scheduling tools will be hidden until it is closed again.";
+
+        if (!window.confirm(text)) return;
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            const result = await request(
+                `/monthly-forms/${selectedId}/${action}`,
+                { method: "PATCH" }
+            );
+
+            await loadForms();
+
+            setMessage(
+                result.message ||
+                (action === "close"
+                    ? "Monthly form closed. You can now freeze dates."
+                    : "Monthly form reopened.")
+            );
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    // ---------------- FROZEN DATES ----------------
+
+    async function addFrozenDate() {
+        if (!dateInput || !selectedId || !selectedForm) return;
+
+        const date = new Date(`${dateInput}T12:00:00`);
+
+        if (
+            date.getMonth() + 1 !== Number(selectedForm.month) ||
+            date.getFullYear() !== Number(selectedForm.year)
+        ) {
+            setError("Choose a date within the selected monthly form.");
+            return;
+        }
+
+        if (isDateFrozen(dateInput)) {
+            setError("That date has already been frozen.");
+            return;
+        }
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            await request("/frozen-dates/", {
+                method: "POST",
+                body: JSON.stringify({
+                    monthly_form_id: Number(selectedId),
+                    frozen_date: dateInput,
+                    reason: null,
+                }),
+            });
+
+            await loadFrozenDates(selectedId);
+
+            setDateInput("");
+            setMessage("Frozen date saved successfully.");
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    async function removeFrozenDate(id) {
+        if (!window.confirm("Remove this frozen date?")) return;
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            await request(`/frozen-dates/${id}`, { method: "DELETE" });
+            await loadFrozenDates(selectedId);
+            setMessage("Frozen date removed successfully.");
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    // ---------------- GENERATE / AUTO ASSIGN ----------------
+
+    async function runAction(action) {
+        if (!scheduleUnlocked) {
+            setError("Close the form and finish freezing dates first.");
+            return;
+        }
+
+        const labels = {
+            generate: "Generate schedule positions",
+            auto: "Run automatic assignments",
+        };
+
+        if (!window.confirm(`${labels[action]} for this monthly form?`)) {
+            return;
+        }
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            const path =
+                action === "generate"
+                    ? `/assignments/generate/${selectedId}`
+                    : `/assignments/auto-assign/${selectedId}`;
+
+            const result = await request(path, { method: "POST" });
+
+            if (action === "auto") {
+                setMessage(
+                    `${result.message} Eligible lectors: ${result.eligible_lectors}. Assigned: ${result.assignments_created}. Left unfilled: ${result.positions_left_unfilled}. Frozen positions skipped: ${result.frozen_positions_skipped}.`
+                );
+            } else {
+                setMessage(
+                    `${result.message} Created: ${result.positions_created}. Already existed: ${result.existing_positions_skipped}.`
+                );
+            }
+
+            await loadAssignments(selectedId);
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    // Uses the backend DELETE /assignments/delete-all/{monthly_form_id}
+    async function deleteAllAssignments() {
+        if (!scheduleUnlocked || assignments.length === 0) return;
+
+        if (
+            !window.confirm(
+                `Delete ALL ${assignments.length} assignment positions for this month, including frozen dates and manual assignments? You can generate positions again afterwards.`
+            )
+        ) {
+            return;
+        }
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            const result = await request(
+                `/assignments/delete-all/${selectedId}`,
+                { method: "DELETE" }
+            );
+
+            cancelEditing();
+            setSelectedDay(null);
+            await loadAssignments(selectedId);
+
+            setMessage(result.message || "All assignments deleted.");
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    // ---------------- MANUAL ASSIGNMENT ----------------
+
+    function startEditing(item) {
+        if (!scheduleUnlocked) {
+            setError("Finish the freezing step before editing.");
+            return;
+        }
+
+        setEditingAssignmentId(item.id);
+        setManualLectorId(
+            item.lector_id != null ? String(item.lector_id) : ""
+        );
+        setOverrideAvailability(false);
+        setError("");
+        setMessage("");
+    }
+
+    async function saveManualAssignment(assignmentId, allowOverride = false) {
+        if (!manualLectorId) {
+            setError("Please select a lector.");
+            return;
+        }
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            const result = await request(
+                `/assignments/${assignmentId}/manual`,
+                {
+                    method: "PATCH",
+                    body: JSON.stringify({
+                        lector_id: Number(manualLectorId),
+                        override_availability: allowOverride,
+                    }),
+                }
+            );
+
+            setMessage(
+                result.message || "Manual assignment saved successfully."
+            );
+
+            cancelEditing();
+            await loadAssignments(selectedId);
+        } catch (err) {
+            // Ask for confirmation only if soft availability warnings exist.
+            let detail = err.detail;
+
+            if (!detail && err.message) {
+                try {
+                    detail = JSON.parse(err.message);
+                } catch {
+                    detail = null;
+                }
+            }
+
+            if (
+                !allowOverride &&
+                detail?.requires_confirmation &&
+                Array.isArray(detail.warnings)
+            ) {
+                const confirmed = window.confirm(
+                    "Availability warnings:\n\n" +
+                    detail.warnings.map((w) => `• ${w}`).join("\n") +
+                    "\n\nDo you want to assign this lector anyway?"
+                );
+
+                if (confirmed) {
+                    setWorking(false);
+                    return saveManualAssignment(assignmentId, true);
+                }
+
+                setError("Assignment cancelled.");
+            } else {
+                setError(err.message || "Could not save assignment.");
+            }
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    async function clearManualAssignment(assignmentId) {
+        if (
+            !window.confirm(
+                "This will permanently remove this position from the calendar. Continue?"
+            )
+        ) {
+            return;
+        }
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            const result = await request(
+                `/assignments/${assignmentId}/manual`,
+                { method: "DELETE" }
+            );
+
+            cancelEditing();
+            await loadAssignments(selectedId);
+
+            setMessage(
+                result.message ||
+                "Assignment position removed from the calendar."
+            );
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    // ---------------- DOWNLOADS ----------------
+
+    function downloadRoster(format) {
+        if (!selectedForm || assignments.length === 0) {
+            setError("Load assignments before downloading the Lectors List.");
+            return;
+        }
+
+        const html = buildRosterDocument(selectedForm, assignments);
+
+        const monthLabel =
+            selectedForm.title ||
+            `${selectedForm.month || "month"}-${selectedForm.year || ""}`;
+
+        const safeName = String(monthLabel)
+            .trim()
+            .replace(/[^a-z0-9-_]+/gi, "-");
+
+        if (format === "word") {
+            const blob = new Blob(["\ufeff", html], {
+                type: "application/msword;charset=utf-8",
+            });
+
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+
+            link.href = url;
+            link.download = `Lectors-List-${safeName}.doc`;
+
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            URL.revokeObjectURL(url);
+            return;
+        }
+
+        const printWindow = window.open("", "_blank");
+
+        if (!printWindow) {
+            setError("Allow pop-ups for this site to create the PDF.");
+            return;
+        }
+
+        printWindow.document.open();
+        printWindow.document.write(html);
+        printWindow.document.close();
+
+        printWindow.onload = () => {
+            printWindow.focus();
+            printWindow.print();
+        };
+    }
+
+    // ---------------- RENDER ----------------
+
+    return (
+        <div>
+            {/* PAGE HEADER */}
+            <div className="page-heading-row">
+                <div>
+                    <p className="eyebrow">PLAN THE MONTH</p>
+                    <h1 className="page-title">Monthly Scheduling</h1>
+                    <p className="page-description">
+                        Close the form, freeze dates, generate the schedule
+                        and manage the monthly calendar.
+                    </p>
+                </div>
+
+                <button
+                    className="secondary-button"
+                    onClick={loadForms}
+                    disabled={loading || working || creatingMonth}
+                >
+                    <RefreshCw size={16} />
+                    Refresh
+                </button>
+            </div>
+
+            {error && <div className="notice-error">{String(error)}</div>}
+            {message && <div className="notice-success">{message}</div>}
+
+            {/* SELECT MONTH + CLOSE FORM */}
+            <section className="content-card">
+                <div className="section-heading">
+                    <div>
+                        <h2>Select Monthly Form</h2>
+                        <p>
+                            Choose the month, then close the form to start
+                            scheduling.
+                        </p>
+                    </div>
+                    <CalendarDays size={25} className="soft-icon" />
+                </div>
+
+                {loading ? (
+                    <p className="loading-message">
+                        Loading monthly forms...
+                    </p>
+                ) : forms.length === 0 ? (
+                    <p className="empty-state">
+                        No monthly forms found. Add a month below to get
+                        started.
+                    </p>
+                ) : (
+                    <>
+                        <select
+                            className="form-select schedule-select"
+                            value={selectedId}
+                            onChange={(e) => selectForm(e.target.value)}
+                        >
+                            {forms.map((form) => (
+                                <option key={form.id} value={form.id}>
+                                    {form.title ||
+                                        `${form.month}/${form.year}`}
+                                    {form.is_open ? " — Open" : " — Closed"}
+                                </option>
+                            ))}
+                        </select>
+
+                        <div className="schedule-actions">
+                            <span
+                                className={`status-pill ${isClosed
+                                    ? "status-inactive"
+                                    : "status-active"
+                                    }`}
+                            >
+                                {isClosed ? (
+                                    <>
+                                        <Lock size={14} /> Form closed
+                                    </>
+                                ) : (
+                                    <>
+                                        <LockOpen size={14} /> Form open
+                                    </>
+                                )}
+                            </span>
+
+                            {isClosed ? (
+                                <button
+                                    className="secondary-button"
+                                    onClick={() => toggleForm("reopen")}
+                                    disabled={working}
+                                >
+                                    <LockOpen size={17} />
+                                    Reopen Form
+                                </button>
+                            ) : (
+                                <button
+                                    className="primary-button"
+                                    onClick={() => toggleForm("close")}
+                                    disabled={working}
+                                >
+                                    <Lock size={17} />
+                                    Close Form
+                                </button>
+                            )}
+
+                            {googleFormUrl ? (
+                                <button
+                                    type="button"
+                                    className="secondary-button"
+                                    onClick={copyGoogleFormLink}
+                                    disabled={working}
+                                >
+                                    <Copy size={17} />
+                                    Copy Form Link
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    className="secondary-button"
+                                    onClick={retryCreateGoogleForm}
+                                    disabled={working || isClosed}
+                                    title={
+                                        isClosed
+                                            ? "A Google Form cannot be created for a closed month"
+                                            : "Create the Google Form for this month"
+                                    }
+                                >
+                                    <FileText size={17} />
+                                    {working
+                                        ? "Working..."
+                                        : "Create Google Form"}
+                                </button>
+                            )}
+                        </div>
+
+                        <p className="field-hint">
+                            {isClosed
+                                ? "Form is closed. Continue with the steps below."
+                                : "Lectors can still submit availability. Close the form to unlock freezing and scheduling."}
+                        </p>
+                    </>
+                )}
+
+                <div className="month-create-row">
+                    <select
+                        className="form-select"
+                        value={newMonth}
+                        onChange={(e) => setNewMonth(e.target.value)}
+                        disabled={creatingMonth || working}
+                    >
+                        {Array.from({ length: 12 }, (_, i) => (
+                            <option key={i + 1} value={i + 1}>
+                                {new Date(2026, i, 1).toLocaleDateString(
+                                    "en-US",
+                                    { month: "long" }
+                                )}
+                            </option>
+                        ))}
+                    </select>
+
+                    <input
+                        type="number"
+                        className="form-select"
+                        min="2026"
+                        value={newYear}
+                        onChange={(e) => setNewYear(e.target.value)}
+                        placeholder="Year"
+                        disabled={creatingMonth || working}
+                    />
+
+                    <button
+                        type="button"
+                        className="primary-button"
+                        onClick={createMonth}
+                        disabled={creatingMonth || working}
+                    >
+                        <Plus size={16} />
+                        {creatingMonth ? "Creating..." : "Add Month"}
+                    </button>
+                </div>
+            </section>
+
+            {/* STEP 1: FROZEN DATES */}
+            {showScheduling && (
+                <section className="content-card">
+                    <div className="section-heading">
+                        <div>
+                            <h2>Step 1 · Frozen Dates</h2>
+                            <p>
+                                Auto-assign skips these dates. You can still
+                                assign them manually.
+                            </p>
+                        </div>
+
+                        {freezeDone ? (
+                            <span className="status-pill status-active">
+                                <CheckCircle2 size={14} /> Done
+                            </span>
+                        ) : (
+                            <CalendarDays size={25} className="soft-icon" />
+                        )}
+                    </div>
+
+                    {!freezeDone && (
+                        <div className="date-add-row">
+                            <input
+                                type="date"
+                                value={dateInput}
+                                onChange={(e) => setDateInput(e.target.value)}
+                                disabled={working}
+                            />
+
+                            <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={addFrozenDate}
+                                disabled={!dateInput || working}
+                            >
+                                <Plus size={16} />
+                                Add Frozen Date
+                            </button>
+                        </div>
+                    )}
+
+                    <div className="date-chips">
+                        {frozenDates.map((item) => (
+                            <button
+                                type="button"
+                                className="date-chip"
+                                key={item.id}
+                                disabled={working || freezeDone}
+                                onClick={() => removeFrozenDate(item.id)}
+                                title={
+                                    freezeDone
+                                        ? "Click Edit Frozen Dates to remove"
+                                        : "Remove frozen date"
+                                }
+                            >
+                                {getDateOnly(item.frozen_date)}
+                                {!freezeDone && <X size={14} />}
+                            </button>
+                        ))}
+                    </div>
+
+                    {frozenDates.length === 0 && (
+                        <p className="empty-state">
+                            No frozen dates selected.
+                        </p>
+                    )}
+
+                    <div className="schedule-actions">
+                        {freezeDone ? (
+                            <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() => persistFreezeDone(false)}
+                                disabled={working}
+                            >
+                                <Pencil size={16} />
+                                Edit Frozen Dates
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                className="primary-button"
+                                onClick={() => persistFreezeDone(true)}
+                                disabled={working}
+                            >
+                                <CheckCircle2 size={16} />
+                                Done Freezing
+                            </button>
+                        )}
+                    </div>
+
+                    <p className="field-hint">
+                        {freezeDone
+                            ? "Frozen dates are locked in. Continue to Step 2."
+                            : "Frozen dates are skipped by auto-assign but can be assigned manually. Click “Done Freezing” when finished."}
+                    </p>
+                </section>
+            )}
+
+            {/* STEP 2: GENERATE / ASSIGN / DELETE */}
+            {showScheduling && (
+                <section
+                    className="content-card"
+                    style={{ opacity: freezeDone ? 1 : 0.55 }}
+                >
+                    <div className="section-heading">
+                        <div>
+                            <h2>Step 2 · Generate &amp; Assign</h2>
+                            <p>
+                                Create positions, auto-assign eligible
+                                lectors, or delete everything and start
+                                again.
+                            </p>
+                        </div>
+                        <WandSparkles size={25} className="soft-icon" />
+                    </div>
+
+                    <div className="schedule-actions">
+                        <button
+                            className="secondary-button"
+                            disabled={working || !scheduleUnlocked}
+                            onClick={() => runAction("generate")}
+                        >
+                            <CalendarDays size={17} />
+                            Generate Positions
+                        </button>
+
+                        <button
+                            className="primary-button"
+                            disabled={working || !scheduleUnlocked}
+                            onClick={() => runAction("auto")}
+                        >
+                            <WandSparkles size={17} />
+                            {working ? "Working..." : "Auto-Assign Lectors"}
+                        </button>
+
+                        <button
+                            className="secondary-button"
+                            disabled={
+                                working ||
+                                !scheduleUnlocked ||
+                                assignments.length === 0
+                            }
+                            onClick={deleteAllAssignments}
+                        >
+                            <Trash2 size={17} />
+                            Delete All Assignments
+                        </button>
+                    </div>
+
+                    <p className="field-hint">
+                        {freezeDone
+                            ? "Positions and automatic lector selection are handled by your backend."
+                            : "Click “Done Freezing” in Step 1 to unlock this step."}
+                    </p>
+                </section>
+            )}
+
+            {/* STEP 3: SUMMARY + CALENDAR */}
+            {showScheduling && (
+                <>
+                    <div className="schedule-summary-grid">
+                        <div className="summary-card">
+                            <CalendarDays size={20} />
+                            <span>Total Positions</span>
+                            <strong>{assignments.length}</strong>
+                        </div>
+
+                        <div className="summary-card">
+                            <CheckCircle2 size={20} />
+                            <span>Filled Positions</span>
+                            <strong>{filled}</strong>
+                        </div>
+
+                        <div className="summary-card">
+                            <CircleAlert size={20} />
+                            <span>Unfilled Positions</span>
+                            <strong>{unfilled}</strong>
+                        </div>
+                    </div>
+
+                    <section className="content-card">
+                        <div className="section-heading">
+                            <div>
+                                <h2>Assignment Progress</h2>
+                                <p>
+                                    Live progress based on saved backend
+                                    assignments.
+                                </p>
+                            </div>
+                            <strong>{progress}%</strong>
+                        </div>
+
+                        <div className="progress-track">
+                            <div
+                                className="progress-fill"
+                                style={{ width: `${progress}%` }}
+                            />
+                        </div>
+                    </section>
+
+                    <section className="content-card">
+                        <div className="section-heading">
+                            <div>
+                                <h2>
+                                    Step 3 · Monthly Schedule
+                                    {selectedForm?.title
+                                        ? ` — ${selectedForm.title}`
+                                        : ""}
+                                </h2>
+                                <p>
+                                    Click any date to view and edit its
+                                    assignments.
+                                </p>
+                            </div>
+                            <CalendarDays size={25} className="soft-icon" />
+                        </div>
+
+                        {assignments.length === 0 ? (
+                            <p className="empty-state">
+                                No assignment positions yet. Generate
+                                positions in Step 2.
+                            </p>
+                        ) : (
+                            <div className="cal-grid-wrap">
+                                <div className="cal-grid">
+                                    {WEEKDAYS.map((d) => (
+                                        <div className="cal-head" key={d}>
+                                            {d}
+                                        </div>
+                                    ))}
+
+                                    {calendarWeeks.flat().map((cell, idx) => {
+                                        if (!cell) {
+                                            return (
+                                                <div
+                                                    className="cal-cell cal-empty"
+                                                    key={`e-${idx}`}
+                                                />
+                                            );
+                                        }
+
+                                        const frozen = isDateFrozen(
+                                            cell.dateStr
+                                        );
+                                        const total = cell.items.length;
+                                        const done = cell.items.filter(
+                                            (i) => i.lector_id != null
+                                        ).length;
+
+                                        // Group by Mass time
+                                        const byTime = [];
+
+                                        cell.items.forEach((item) => {
+                                            const t = formatMassTime(
+                                                getMassTime(item)
+                                            );
+                                            let g = byTime.find(
+                                                (x) => x.time === t
+                                            );
+
+                                            if (!g) {
+                                                g = { time: t, items: [] };
+                                                byTime.push(g);
+                                            }
+
+                                            g.items.push(item);
+                                        });
+
+                                        return (
+                                            <button
+                                                type="button"
+                                                key={cell.dateStr}
+                                                className={`cal-cell ${selectedDay === cell.dateStr
+                                                    ? "cal-selected"
+                                                    : ""
+                                                    } ${frozen ? "cal-frozen" : ""
+                                                    }`}
+                                                onClick={() => {
+                                                    setSelectedDay(
+                                                        cell.dateStr
+                                                    );
+                                                    cancelEditing();
+                                                }}
+                                            >
+                                                <div className="cal-date-row">
+                                                    <span className="cal-date">
+                                                        {cell.dayNumber}
+                                                    </span>
+
+                                                    <span className="cal-badges">
+                                                        {frozen && (
+                                                            <span className="cal-badge">
+                                                                Frozen
+                                                            </span>
+                                                        )}
+                                                        {total > 0 && (
+                                                            <span
+                                                                className={`cal-badge ${done === total
+                                                                    ? "cal-badge-ok"
+                                                                    : "cal-badge-warn"
+                                                                    }`}
+                                                            >
+                                                                {done}/{total}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </div>
+
+                                                <div className="cal-lines">
+                                                    {byTime.map((g) => (
+                                                        <div
+                                                            className="cal-time-group"
+                                                            key={g.time}
+                                                        >
+                                                            <span className="cal-time">
+                                                                {g.time}
+                                                            </span>
+
+                                                            {g.items.map(
+                                                                (item) => (
+                                                                    <span
+                                                                        key={
+                                                                            item.id
+                                                                        }
+                                                                        className={`cal-line ${item.lector_id ==
+                                                                            null
+                                                                            ? "cal-line-empty"
+                                                                            : ""
+                                                                            }`}
+                                                                    >
+                                                                        <b>
+                                                                            {getReadingLabel(
+                                                                                item
+                                                                            ) ||
+                                                                                "—"}
+                                                                        </b>{" "}
+                                                                        {item.lector_id !=
+                                                                            null
+                                                                            ? getAssignmentName(
+                                                                                item
+                                                                            )
+                                                                            : "—"}
+                                                                    </span>
+                                                                )
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                    </section>
+
+                    {/* DAY DETAIL / EDIT PANEL */}
+                    {selectedDay && (
+                        <section className="content-card">
+                            <div className="section-heading">
+                                <div>
+                                    <h2>
+                                        {new Date(
+                                            `${selectedDay}T12:00:00`
+                                        ).toLocaleDateString("en-GB", {
+                                            weekday: "long",
+                                            day: "numeric",
+                                            month: "long",
+                                            year: "numeric",
+                                        })}
+                                    </h2>
+                                    <p>
+                                        {isDateFrozen(selectedDay)
+                                            ? "Frozen date: auto-assign skips it. Assign lectors manually."
+                                            : "Edit or remove positions for this date."}
+                                    </p>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    className="secondary-button"
+                                    onClick={() => {
+                                        setSelectedDay(null);
+                                        cancelEditing();
+                                    }}
+                                >
+                                    <X size={15} />
+                                    Close
+                                </button>
+                            </div>
+
+                            {selectedDayItems.length === 0 ? (
+                                <p className="empty-state">
+                                    No positions on this date.
+                                </p>
+                            ) : (
+                                <div className="calendar-mass-list">
+                                    {selectedDayItems.map((item) => {
+                                        const isEditing =
+                                            editingAssignmentId === item.id;
+                                        const blocked = !scheduleUnlocked;
+
+                                        return (
+                                            <div
+                                                className="calendar-assignment"
+                                                key={item.id}
+                                            >
+                                                <div className="calendar-assignment-main">
+                                                    <div className="calendar-assignment-time">
+                                                        <strong>
+                                                            {formatMassTime(
+                                                                getMassTime(
+                                                                    item
+                                                                )
+                                                            )}
+                                                        </strong>
+                                                        <span>
+                                                            {item.mass_type ||
+                                                                item.mass_slot
+                                                                    ?.mass_type ||
+                                                                "Mass"}
+                                                        </span>
+                                                    </div>
+
+                                                    <div className="calendar-assignment-info">
+                                                        <strong>
+                                                            {
+                                                                item.responsibility
+                                                            }
+                                                        </strong>
+                                                        <span>
+                                                            Position{" "}
+                                                            {
+                                                                item.position_number
+                                                            }
+                                                        </span>
+                                                        <span
+                                                            className={
+                                                                item.lector_id !=
+                                                                    null
+                                                                    ? "assignment-lector"
+                                                                    : "assignment-unfilled"
+                                                            }
+                                                        >
+                                                            <UsersRound
+                                                                size={15}
+                                                            />
+                                                            {getAssignmentName(
+                                                                item
+                                                            )}
+                                                        </span>
+                                                    </div>
+
+                                                    <span
+                                                        className={`status-pill ${item.lector_id !=
+                                                            null
+                                                            ? "status-active"
+                                                            : "status-pending"
+                                                            }`}
+                                                    >
+                                                        {item.lector_id !=
+                                                            null
+                                                            ? "Assigned"
+                                                            : "Unassigned"}
+                                                    </span>
+                                                </div>
+
+                                                <div className="calendar-assignment-actions">
+                                                    {item.is_manual && (
+                                                        <span className="field-hint">
+                                                            Manual
+                                                        </span>
+                                                    )}
+
+                                                    {item.is_protected && (
+                                                        <span className="field-hint">
+                                                            Protected
+                                                        </span>
+                                                    )}
+
+                                                    <button
+                                                        type="button"
+                                                        className="secondary-button"
+                                                        disabled={
+                                                            working ||
+                                                            blocked
+                                                        }
+                                                        onClick={() =>
+                                                            startEditing(item)
+                                                        }
+                                                    >
+                                                        <Pencil size={15} />
+                                                        Edit
+                                                    </button>
+
+                                                    <button
+                                                        type="button"
+                                                        className="secondary-button"
+                                                        disabled={
+                                                            working ||
+                                                            blocked
+                                                        }
+                                                        onClick={() =>
+                                                            clearManualAssignment(
+                                                                item.id
+                                                            )
+                                                        }
+                                                    >
+                                                        <Trash2 size={15} />
+                                                        Clear Position
+                                                    </button>
+                                                </div>
+
+                                                {isEditing && (
+                                                    <div className="manual-editor">
+                                                        <h4>
+                                                            Manually assign
+                                                            lector
+                                                        </h4>
+
+                                                        <label>
+                                                            Select an active
+                                                            lector
+                                                        </label>
+
+                                                        <select
+                                                            className="form-select"
+                                                            value={
+                                                                manualLectorId
+                                                            }
+                                                            onChange={(e) =>
+                                                                setManualLectorId(
+                                                                    e.target
+                                                                        .value
+                                                                )
+                                                            }
+                                                        >
+                                                            <option value="">
+                                                                Choose a
+                                                                lector
+                                                            </option>
+
+                                                            {activeLectors.map(
+                                                                (lector) => (
+                                                                    <option
+                                                                        key={
+                                                                            lector.id
+                                                                        }
+                                                                        value={
+                                                                            lector.id
+                                                                        }
+                                                                    >
+                                                                        {getLectorName(
+                                                                            lector,
+                                                                            lector.id
+                                                                        )}
+                                                                    </option>
+                                                                )
+                                                            )}
+                                                        </select>
+
+                                                        <p className="field-hint">
+                                                            Hard scheduling
+                                                            conflicts, such as
+                                                            consecutive serving
+                                                            days, are still
+                                                            checked by the
+                                                            backend.
+                                                        </p>
+
+                                                        <div className="schedule-actions">
+                                                            <button
+                                                                type="button"
+                                                                className="primary-button"
+                                                                disabled={
+                                                                    working ||
+                                                                    !manualLectorId
+                                                                }
+                                                                onClick={() =>
+                                                                    saveManualAssignment(
+                                                                        item.id
+                                                                    )
+                                                                }
+                                                            >
+                                                                Save
+                                                                Assignment
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                className="secondary-button"
+                                                                disabled={
+                                                                    working
+                                                                }
+                                                                onClick={
+                                                                    cancelEditing
+                                                                }
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </section>
+                    )}
+
+                    {/* DOWNLOAD */}
+                    <section className="content-card">
+                        <div className="section-heading">
+                            <div>
+                                <h2>Download Lectors List</h2>
+                                <p>
+                                    Export the assignments in your printable
+                                    church roster format.
+                                </p>
+                            </div>
+                            <Download size={25} className="soft-icon" />
+                        </div>
+
+                        <div className="schedule-actions roster-download-actions">
+                            <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() => downloadRoster("pdf")}
+                                disabled={assignments.length === 0}
+                            >
+                                <FileText size={17} />
+                                Download PDF
+                            </button>
+
+                            <button
+                                type="button"
+                                className="primary-button"
+                                onClick={() => downloadRoster("word")}
+                                disabled={assignments.length === 0}
+                            >
+                                <Download size={17} />
+                                Download Word
+                            </button>
+                        </div>
+
+                        <p className="field-hint">
+                            The printable Date, Day, Readings and Mass time
+                            table is generated when you download the roster.
+                        </p>
+                    </section>
+                </>
+            )}
+        </div>
+    );
+}

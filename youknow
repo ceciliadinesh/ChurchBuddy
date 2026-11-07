@@ -1,0 +1,39 @@
+source .venv/bin/activate
+{
+  "username": "admin",
+  "password": "ChurchBuddy@2026"
+}
+
+CREATE_SECRET: e30bd992692c7d3302c3c45678d6cd67f149c7920dc6401f053d54753d46830a
+WEBHOOK_SECRET: eeba5c1a14a4eb965e6454deeac264b4cbe50e38552695d8fc65808c79428d91
+
+https://script.google.com/macros/s/AKfycbw2oLckq3NDdf2aM0_mvjrVaed-gX9KIhd-Y_LkVgqcVZnMaxx84dA5-MEiiy7B_Q-a/exec
+
+
+{
+  "message": "Admin login successful.",
+  "access_token": "eyJzdWIiOiJhZG1pbiIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc5Mzk4ODc5OCwiZXhwIjoxNzk0MDE3NTk4fQ.zrGM9e0Zfz2sblCmh5JVnF7BG-cY08qBooKXd7Lz55A",
+  "token_type": "bearer",
+  "expires_in": 28800
+}
+
+to check google form data :
+SELECT
+    l.*,
+    s.*,
+    lad.day_name,
+    lr.responsibility,
+    ud.start_date,
+    ud.end_date,
+    ud.reason
+FROM availability_submissions s
+JOIN lectors l
+    ON l.id = s.lector_id
+LEFT JOIN lector_available_days lad
+    ON lad.submission_id = s.id
+LEFT JOIN lector_responsibilities lr
+    ON lr.submission_id = s.id
+LEFT JOIN unavailable_dates ud
+    ON ud.submission_id = s.id
+WHERE s.monthly_form_id = 2
+ORDER BY l.id;

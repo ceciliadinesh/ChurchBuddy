@@ -1,0 +1,27 @@
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Time,
+    Boolean,
+    UniqueConstraint,
+)
+from app.database import Base
+
+
+class MassSlot(Base):
+    __tablename__ = "mass_slots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    mass_time = Column(Time, nullable=False)
+    mass_type = Column(String(20), nullable=False)
+    is_sunday = Column(Boolean, default=False, nullable=False)
+    is_manual_only = Column(Boolean, default=False, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "mass_time",
+            "mass_type",
+            name="uq_mass_slot"
+        ),
+    )
