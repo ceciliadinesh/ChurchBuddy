@@ -1,0 +1,903 @@
+
+/* =========================================================
+   MONTHLY SCHEDULING
+   Scoped styles — does not affect other admin pages
+========================================================= */
+
+.monthly-scheduling {
+    --ms-bg: #fffefa;
+    --ms-surface: #ffffff;
+    --ms-cream: #faf9f7;
+    --ms-text: #514248;
+    --ms-muted: #95868a;
+    --ms-rose: #805a68;
+    --ms-rose-light: #f8edf0;
+    --ms-rose-border: #eadde0;
+    --ms-sage: #7c9277;
+    --ms-sage-light: #edf2e9;
+    --ms-peach: #bd8b6c;
+    --ms-peach-light: #fbf0e8;
+    --ms-lavender: #8d80a9;
+    --ms-lavender-light: #f0edf7;
+    --ms-border: #eee8e5;
+    --ms-danger: #a85d61;
+    --ms-danger-light: #fbefef;
+    --ms-shadow: 0 4px 16px rgba(81, 66, 72, 0.045);
+
+    width: 100%;
+    min-width: 0;
+    color: var(--ms-text);
+    font-family: inherit;
+}
+
+.monthly-scheduling *,
+.monthly-scheduling *::before,
+.monthly-scheduling *::after {
+    box-sizing: border-box;
+}
+
+.monthly-scheduling button,
+.monthly-scheduling input,
+.monthly-scheduling select {
+    font: inherit;
+}
+
+.monthly-scheduling button {
+    cursor: pointer;
+}
+
+.monthly-scheduling button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+
+/* =========================================================
+   PAGE HEADER
+========================================================= */
+
+.monthly-scheduling .page-heading-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 26px;
+}
+
+.monthly-scheduling .eyebrow {
+    margin: 0 0 7px;
+    color: var(--ms-rose);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.13em;
+}
+
+.monthly-scheduling .page-title {
+    margin: 0;
+    color: var(--ms-text);
+    font-size: clamp(1.6rem, 3vw, 2rem);
+    font-weight: 750;
+    letter-spacing: -0.035em;
+    line-height: 1.2;
+}
+
+.monthly-scheduling .page-description {
+    max-width: 650px;
+    margin: 9px 0 0;
+    color: var(--ms-muted);
+    font-size: 0.92rem;
+    line-height: 1.65;
+}
+
+/* =========================================================
+   NOTIFICATIONS
+========================================================= */
+
+.monthly-scheduling .notice-error,
+.monthly-scheduling .notice-success {
+    margin: 0 0 18px;
+    padding: 13px 16px;
+    border: 1px solid;
+    border-radius: 12px;
+    font-size: 0.88rem;
+    line-height: 1.55;
+}
+
+.monthly-scheduling .notice-error {
+    color: var(--ms-danger);
+    background: var(--ms-danger-light);
+    border-color: #efd9da;
+}
+
+.monthly-scheduling .notice-success {
+    color: #607b5d;
+    background: var(--ms-sage-light);
+    border-color: #dce7d7;
+}
+
+/* =========================================================
+   CONTENT CARDS
+========================================================= */
+
+.monthly-scheduling .content-card {
+    min-width: 0;
+    margin-bottom: 20px;
+    padding: 23px;
+    background: var(--ms-surface);
+    border: 1px solid var(--ms-border);
+    border-radius: 17px;
+    box-shadow: var(--ms-shadow);
+}
+
+.monthly-scheduling .section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.monthly-scheduling .section-heading h2 {
+    margin: 0;
+    color: var(--ms-text);
+    font-size: 1.08rem;
+    font-weight: 750;
+    line-height: 1.4;
+}
+
+.monthly-scheduling .section-heading p {
+    margin: 5px 0 0;
+    color: var(--ms-muted);
+    font-size: 0.84rem;
+    line-height: 1.55;
+}
+
+.monthly-scheduling .soft-icon {
+    flex-shrink: 0;
+    color: var(--ms-rose);
+    padding: 4px;
+    width: 34px;
+    height: 34px;
+    background: var(--ms-rose-light);
+    border-radius: 10px;
+}
+
+/* =========================================================
+   BUTTONS
+========================================================= */
+
+.monthly-scheduling .primary-button,
+.monthly-scheduling .secondary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 41px;
+    padding: 10px 15px;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    font-size: 0.84rem;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    transition:
+        background 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease,
+        transform 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+.monthly-scheduling .primary-button {
+    color: #fff;
+    background: var(--ms-rose);
+    border-color: var(--ms-rose);
+}
+
+.monthly-scheduling .primary-button:hover:not(:disabled) {
+    background: #6e4c59;
+    border-color: #6e4c59;
+    box-shadow: 0 4px 12px rgba(128, 90, 104, 0.18);
+    transform: translateY(-1px);
+}
+
+.monthly-scheduling .secondary-button {
+    color: var(--ms-text);
+    background: var(--ms-bg);
+    border-color: var(--ms-border);
+}
+
+.monthly-scheduling .secondary-button:hover:not(:disabled) {
+    color: var(--ms-rose);
+    background: var(--ms-rose-light);
+    border-color: var(--ms-rose-border);
+    transform: translateY(-1px);
+}
+
+.monthly-scheduling button:focus-visible,
+.monthly-scheduling select:focus-visible,
+.monthly-scheduling input:focus-visible {
+    outline: 3px solid rgba(177, 123, 138, 0.3);
+    outline-offset: 2px;
+}
+
+/* =========================================================
+   FORM FIELDS
+========================================================= */
+
+.monthly-scheduling .form-select,
+.monthly-scheduling input[type="date"],
+.monthly-scheduling input[type="number"],
+.monthly-scheduling .date-add-row input {
+    width: 100%;
+    min-width: 0;
+    min-height: 43px;
+    padding: 10px 12px;
+    color: var(--ms-text);
+    background: var(--ms-bg);
+    border: 1px solid var(--ms-border);
+    border-radius: 10px;
+    font-size: 0.88rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.monthly-scheduling .form-select:focus,
+.monthly-scheduling input:focus {
+    border-color: #c7aab4;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(177, 123, 138, 0.1);
+}
+
+.monthly-scheduling .form-select:disabled,
+.monthly-scheduling input:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.monthly-scheduling .schedule-select {
+    max-width: 460px;
+}
+
+.monthly-scheduling .field-hint {
+    display: block;
+    margin: 12px 0 0;
+    color: var(--ms-muted);
+    font-size: 0.79rem;
+    line-height: 1.6;
+}
+
+.monthly-scheduling .loading-message,
+.monthly-scheduling .empty-state {
+    margin: 14px 0;
+    padding: 15px;
+    color: var(--ms-muted);
+    background: var(--ms-cream);
+    border: 1px dashed var(--ms-border);
+    border-radius: 11px;
+    font-size: 0.86rem;
+    line-height: 1.6;
+    text-align: center;
+}
+
+/* =========================================================
+   FORM STATUS AND ACTIONS
+========================================================= */
+
+.monthly-scheduling .schedule-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 17px;
+}
+
+.monthly-scheduling .status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: fit-content;
+    padding: 7px 11px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 0.76rem;
+    font-weight: 750;
+    white-space: nowrap;
+}
+
+.monthly-scheduling .status-active {
+    color: #637d5d;
+    background: var(--ms-sage-light);
+    border-color: #dce7d7;
+}
+
+.monthly-scheduling .status-inactive {
+    color: var(--ms-rose);
+    background: var(--ms-rose-light);
+    border-color: var(--ms-rose-border);
+}
+
+.monthly-scheduling .status-pending {
+    color: #a47752;
+    background: var(--ms-peach-light);
+    border-color: #f0dfd1;
+}
+
+/* =========================================================
+   ADD MONTH
+========================================================= */
+
+.monthly-scheduling .month-create-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) minmax(110px, 0.7fr) auto;
+    align-items: center;
+    gap: 10px;
+    margin-top: 22px;
+    padding-top: 20px;
+    border-top: 1px solid var(--ms-border);
+}
+
+/* =========================================================
+   FROZEN DATES
+========================================================= */
+
+.monthly-scheduling .date-add-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 560px;
+}
+
+.monthly-scheduling .date-add-row input {
+    flex: 1;
+}
+
+.monthly-scheduling .date-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 9px;
+    margin-top: 16px;
+}
+
+.monthly-scheduling .date-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 7px 11px;
+    color: var(--ms-rose);
+    background: var(--ms-rose-light);
+    border: 1px solid var(--ms-rose-border);
+    border-radius: 9px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    transition: background 0.2s ease;
+}
+
+.monthly-scheduling .date-chip:hover:not(:disabled) {
+    background: #f1e2e7;
+}
+
+/* =========================================================
+   SUMMARY CARDS
+========================================================= */
+
+.monthly-scheduling .schedule-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.monthly-scheduling .summary-card {
+    display: grid;
+    grid-template-columns: 38px 1fr;
+    align-items: center;
+    column-gap: 11px;
+    row-gap: 3px;
+    min-width: 0;
+    padding: 18px;
+    background: var(--ms-surface);
+    border: 1px solid var(--ms-border);
+    border-radius: 15px;
+    box-shadow: var(--ms-shadow);
+}
+
+.monthly-scheduling .summary-card > svg {
+    grid-row: span 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 8px;
+    color: var(--ms-rose);
+    background: var(--ms-rose-light);
+    border-radius: 10px;
+}
+
+.monthly-scheduling .summary-card:nth-child(2) > svg {
+    color: var(--ms-sage);
+    background: var(--ms-sage-light);
+}
+
+.monthly-scheduling .summary-card:nth-child(3) > svg {
+    color: var(--ms-peach);
+    background: var(--ms-peach-light);
+}
+
+.monthly-scheduling .summary-card span {
+    color: var(--ms-muted);
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
+.monthly-scheduling .summary-card strong {
+    color: var(--ms-text);
+    font-size: 1.45rem;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+/* =========================================================
+   ASSIGNMENT PROGRESS
+========================================================= */
+
+.monthly-scheduling .progress-track {
+    width: 100%;
+    height: 11px;
+    overflow: hidden;
+    background: #f1ece9;
+    border-radius: 999px;
+}
+
+.monthly-scheduling .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #805a68, #b17b8a);
+    border-radius: inherit;
+    transition: width 0.35s ease;
+}
+
+/* =========================================================
+   CALENDAR
+========================================================= */
+
+.monthly-scheduling .cal-grid-wrap {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 5px;
+}
+
+.monthly-scheduling .cal-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(105px, 1fr));
+    min-width: 760px;
+    gap: 7px;
+}
+
+.monthly-scheduling .cal-head {
+    padding: 11px 5px;
+    color: var(--ms-rose);
+    background: var(--ms-rose-light);
+    border: 1px solid var(--ms-rose-border);
+    border-radius: 9px;
+    font-size: 0.77rem;
+    font-weight: 800;
+    text-align: center;
+}
+
+.monthly-scheduling .cal-cell {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 130px;
+    padding: 9px;
+    color: var(--ms-text);
+    background: var(--ms-bg);
+    border: 1px solid var(--ms-border);
+    border-radius: 10px;
+    text-align: left;
+    transition:
+        border-color 0.18s ease,
+        background 0.18s ease,
+        box-shadow 0.18s ease;
+}
+
+.monthly-scheduling button.cal-cell:hover {
+    background: #fcf7f8;
+    border-color: #d9c2ca;
+}
+
+.monthly-scheduling .cal-empty {
+    min-height: 75px;
+    background: #faf9f7;
+    border-style: dashed;
+    opacity: 0.65;
+}
+
+.monthly-scheduling .cal-selected {
+    background: var(--ms-rose-light);
+    border: 2px solid #b17b8a;
+    box-shadow: 0 0 0 2px rgba(177, 123, 138, 0.08);
+}
+
+.monthly-scheduling .cal-frozen {
+    background: #f8f5f0;
+}
+
+.monthly-scheduling .cal-date-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 4px;
+    margin-bottom: 9px;
+}
+
+.monthly-scheduling .cal-date {
+    color: var(--ms-text);
+    font-size: 0.91rem;
+    font-weight: 800;
+}
+
+.monthly-scheduling .cal-badges {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 3px;
+}
+
+.monthly-scheduling .cal-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 5px;
+    color: var(--ms-rose);
+    background: var(--ms-rose-light);
+    border-radius: 5px;
+    font-size: 0.59rem;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.monthly-scheduling .cal-badge-ok {
+    color: #627c5d;
+    background: var(--ms-sage-light);
+}
+
+.monthly-scheduling .cal-badge-warn {
+    color: #a47752;
+    background: var(--ms-peach-light);
+}
+
+.monthly-scheduling .cal-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+}
+
+.monthly-scheduling .cal-time-group {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.monthly-scheduling .cal-time {
+    color: var(--ms-rose);
+    font-size: 0.66rem;
+    font-weight: 800;
+}
+
+.monthly-scheduling .cal-line {
+    display: block;
+    overflow: hidden;
+    color: #71656a;
+    font-size: 0.65rem;
+    line-height: 1.4;
+    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
+}
+
+.monthly-scheduling .cal-line b {
+    color: var(--ms-text);
+}
+
+.monthly-scheduling .cal-line-empty {
+    color: var(--ms-danger);
+}
+
+/* =========================================================
+   DAY DETAIL / ASSIGNMENTS
+========================================================= */
+
+.monthly-scheduling .calendar-mass-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.monthly-scheduling .calendar-assignment {
+    min-width: 0;
+    padding: 16px;
+    background: var(--ms-cream);
+    border: 1px solid var(--ms-border);
+    border-radius: 13px;
+}
+
+.monthly-scheduling .calendar-assignment-main {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.monthly-scheduling .calendar-assignment-time {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 95px;
+}
+
+.monthly-scheduling .calendar-assignment-time strong {
+    color: var(--ms-rose);
+    font-size: 0.94rem;
+}
+
+.monthly-scheduling .calendar-assignment-time span,
+.monthly-scheduling .calendar-assignment-info > span {
+    color: var(--ms-muted);
+    font-size: 0.77rem;
+}
+
+.monthly-scheduling .calendar-assignment-info {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 150px;
+}
+
+.monthly-scheduling .calendar-assignment-info > strong {
+    color: var(--ms-text);
+    font-size: 0.9rem;
+}
+
+.monthly-scheduling .calendar-assignment-info .assignment-lector,
+.monthly-scheduling .calendar-assignment-info .assignment-unfilled {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+    font-weight: 650;
+}
+
+.monthly-scheduling .assignment-lector {
+    color: #6d8668 !important;
+}
+
+.monthly-scheduling .assignment-unfilled {
+    color: var(--ms-danger) !important;
+}
+
+.monthly-scheduling .calendar-assignment-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--ms-border);
+}
+
+.monthly-scheduling .calendar-assignment-actions .field-hint {
+    display: inline-flex;
+    width: auto;
+    margin: 0 5px 0 0;
+    padding: 5px 8px;
+    color: var(--ms-lavender);
+    background: var(--ms-lavender-light);
+    border-radius: 6px;
+    font-size: 0.7rem;
+}
+
+/* =========================================================
+   MANUAL ASSIGNMENT EDITOR
+========================================================= */
+
+.monthly-scheduling .manual-editor {
+    margin-top: 14px;
+    padding: 17px;
+    background: #fff;
+    border: 1px solid var(--ms-rose-border);
+    border-radius: 12px;
+}
+
+.monthly-scheduling .manual-editor h4 {
+    margin: 0 0 14px;
+    color: var(--ms-rose);
+    font-size: 0.92rem;
+    font-weight: 750;
+}
+
+.monthly-scheduling .manual-editor label {
+    display: block;
+    margin-bottom: 7px;
+    color: var(--ms-text);
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
+.monthly-scheduling .manual-editor .form-select {
+    max-width: 440px;
+}
+
+/* =========================================================
+   DOWNLOAD ROSTER
+========================================================= */
+
+.monthly-scheduling .roster-download-actions {
+    margin-top: 0;
+}
+
+/* =========================================================
+   RESPONSIVE — TABLET
+========================================================= */
+
+@media (max-width: 900px) {
+    .monthly-scheduling .content-card {
+        padding: 19px;
+    }
+
+    .monthly-scheduling .cal-grid {
+        grid-template-columns: repeat(7, minmax(100px, 1fr));
+        min-width: 720px;
+    }
+
+    .monthly-scheduling .cal-cell {
+        min-height: 115px;
+    }
+}
+
+/* =========================================================
+   RESPONSIVE — MOBILE
+========================================================= */
+
+@media (max-width: 650px) {
+    .monthly-scheduling .page-heading-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 15px;
+    }
+
+    .monthly-scheduling .page-heading-row > button {
+        align-self: flex-start;
+    }
+
+    .monthly-scheduling .content-card {
+        padding: 16px;
+        margin-bottom: 15px;
+        border-radius: 14px;
+    }
+
+    .monthly-scheduling .section-heading {
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+
+    .monthly-scheduling .section-heading h2 {
+        font-size: 1rem;
+    }
+
+    .monthly-scheduling .section-heading p {
+        font-size: 0.8rem;
+    }
+
+    .monthly-scheduling .month-create-row {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .monthly-scheduling .month-create-row button {
+        grid-column: 1 / -1;
+        width: 100%;
+    }
+
+    .monthly-scheduling .schedule-summary-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .monthly-scheduling .summary-card {
+        padding: 14px;
+    }
+
+    .monthly-scheduling .date-add-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .monthly-scheduling .date-add-row button {
+        width: 100%;
+    }
+
+    .monthly-scheduling .schedule-actions {
+        align-items: stretch;
+    }
+
+    .monthly-scheduling .schedule-actions > button {
+        flex: 1 1 auto;
+    }
+
+    .monthly-scheduling .calendar-assignment-main {
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .monthly-scheduling .calendar-assignment-time {
+        min-width: 85px;
+    }
+
+    .monthly-scheduling .calendar-assignment-info {
+        min-width: 120px;
+    }
+
+    .monthly-scheduling .calendar-assignment-main > .status-pill {
+        margin-left: auto;
+    }
+
+    .monthly-scheduling .calendar-assignment-actions > button {
+        flex: 1 1 auto;
+    }
+}
+
+/* =========================================================
+   RESPONSIVE — SMALL PHONES
+========================================================= */
+
+@media (max-width: 420px) {
+    .monthly-scheduling .page-title {
+        font-size: 1.55rem;
+    }
+
+    .monthly-scheduling .page-description {
+        font-size: 0.84rem;
+    }
+
+    .monthly-scheduling .content-card {
+        padding: 13px;
+    }
+
+    .monthly-scheduling .primary-button,
+    .monthly-scheduling .secondary-button {
+        min-height: 39px;
+        padding: 9px 11px;
+        font-size: 0.78rem;
+    }
+
+    .monthly-scheduling .month-create-row {
+        grid-template-columns: 1fr;
+    }
+
+    .monthly-scheduling .month-create-row button {
+        grid-column: auto;
+    }
+
+    .monthly-scheduling .calendar-assignment {
+        padding: 12px;
+    }
+
+    .monthly-scheduling .calendar-assignment-main {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .monthly-scheduling .calendar-assignment-main > .status-pill {
+        margin-left: 0;
+    }
+
+    .monthly-scheduling .calendar-assignment-actions {
+        align-items: stretch;
+    }
+
+    .monthly-scheduling .calendar-assignment-actions > button {
+        width: 100%;
+    }
+}

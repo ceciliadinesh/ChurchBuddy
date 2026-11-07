@@ -16,7 +16,7 @@ import {
     CircleAlert,
     Copy,
 } from "lucide-react";
-
+import "./MonthlyScheduling.css";
 const API_URL =
     import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
@@ -1277,7 +1277,7 @@ export default function MonthlyScheduling() {
     // ---------------- RENDER ----------------
 
     return (
-        <div>
+        <div className="monthly-scheduling">
             {/* PAGE HEADER */}
             <div className="page-heading-row">
                 <div>

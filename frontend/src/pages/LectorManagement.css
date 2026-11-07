@@ -1106,4 +1106,85 @@
       transition-duration: .01ms !important;
     }
   }
+
+  /* =========================================
+   CHERRY BLOSSOM – FINAL THEME OVERRIDES
+========================================= */
+
+/* Transparent page background */
+.lector-page {
+  background: transparent !important;
+}
+
+
+
+/* Slightly darker icon accents */
+.lector-refresh-button,
+.lector-action-button {
+  color: #6e605c;
+}
+
+.lector-refresh-button:hover:not(:disabled),
+.lector-action-button:hover {
+  color: #574b47;
+  background: #f1edeb;
+  border-color: #d9cbc5;
+}
+
+/* Person avatars */
+.lector-avatar {
+  color: #ffffff;
+  background: #86736D;
+  border-color: #e4d8d3;
+}
+
+/* Active status – green indicator */
+.lector-status-active {
+  color: #6e605c;
+  background: #f8f6f5;
+}
+
+.lector-status-active > span {
+  background: #22a45a;
+  box-shadow: 0 0 0 3px rgba(34, 164, 90, 0.12);
+}
+
+/* Inactive status */
+.lector-status-inactive {
+  color: #9a6a36;
+  background: #fff5e8;
+}
+
+/* Search icon */
+.lector-search > svg {
+  color: #6e605c;
+}
+
+/* Modal and form icons */
+.lector-modal-icon svg,
+.lector-phone-icon svg,
+.lector-empty-icon svg,
+.lector-stat-icon svg {
+  color: #6e605c;
+}
+
+/* Subtle panel appearance */
+.lector-panel,
+.lector-stat-card {
+  background: #ffffff;
+  border-color: #eee5e2;
+}
+
+/* Soft cherry blossom hover */
+.lector-stat-card:hover {
+  border-color: #e5d3d1;
+  box-shadow: 0 8px 24px rgba(110, 96, 92, 0.08);
+}
+
+/* Focus states */
+.lector-search:focus-within,
+.lector-field input:focus {
+  border-color: #a99189;
+  box-shadow: 0 0 0 3px rgba(110, 96, 92, 0.09);
+}
   

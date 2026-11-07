@@ -10,7 +10,14 @@ import {
   RefreshCw,
   Search,
   FileText,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  CalendarCheck,
+  UserRound,
 } from "lucide-react";
+
+import "./AdminDashboard.css";
 
 const API_URL =
   import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
@@ -61,6 +68,30 @@ function getLectorName(lector, lectorId) {
   );
 }
 
+function StatCard({ label, value, note, icon: Icon, color }) {
+  return (
+    <div className="dashboard-stat-card">
+      <div className="dashboard-stat-top">
+        <div className={`dashboard-stat-icon ${color}`}>
+          <Icon size={21} strokeWidth={1.9} />
+        </div>
+
+        <span className="dashboard-stat-note">
+          {note}
+        </span>
+      </div>
+
+      <div className="dashboard-stat-value">
+        {value}
+      </div>
+
+      <div className="dashboard-stat-label">
+        {label}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard() {
   const [lectors, setLectors] = useState([]);
   const [forms, setForms] = useState([]);
@@ -75,28 +106,6 @@ export default function AdminDashboard() {
     useState(false);
 
   const [error, setError] = useState("");
-
-  async function loadSubmissions(formId) {
-    if (!formId) {
-      setSubmissions([]);
-      return;
-    }
-
-    setSubmissionLoading(true);
-
-    try {
-      const data = await apiGet(
-        `/availability/monthly-form/${formId}`
-      );
-
-      setSubmissions(getList(data));
-    } catch (err) {
-      setSubmissions([]);
-      setError(err.message);
-    } finally {
-      setSubmissionLoading(false);
-    }
-  }
 
   async function loadDashboard() {
     setLoading(true);
@@ -163,6 +172,8 @@ export default function AdminDashboard() {
       return;
     }
 
+    setSubmissionLoading(true);
+
     try {
       const [assignmentData, submissionData] =
         await Promise.all([
@@ -174,6 +185,8 @@ export default function AdminDashboard() {
       setSubmissions(getList(submissionData));
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSubmissionLoading(false);
     }
   }
 
@@ -188,6 +201,24 @@ export default function AdminDashboard() {
   const unfilledPositions = assignments.filter(
     (assignment) => assignment.lector_id === null
   ).length;
+
+  const progress =
+    assignments.length > 0
+      ? (assignedPositions / assignments.length) * 100
+      : 0;
+
+  const filteredSubmissions = submissions.filter(
+    (submission) => {
+      const name = getLectorName(
+        submission.lector,
+        submission.lector_id
+      );
+
+      return name
+        .toLowerCase()
+        .includes(searchName.trim().toLowerCase());
+    }
+  );
 
   const stats = [
     {
@@ -220,225 +251,250 @@ export default function AdminDashboard() {
     },
   ];
 
-  const progress =
-    assignments.length > 0
-      ? (assignedPositions / assignments.length) * 100
-      : 0;
-
-  const filteredSubmissions = submissions.filter(
-    (submission) => {
-      const name = getLectorName(
-        submission.lector,
-        submission.lector_id
-      );
-
-      return name
-        .toLowerCase()
-        .includes(searchName.trim().toLowerCase());
-    }
-  );
-
   return (
-    <div>
-      <div className="page-heading-row">
-        <div>
-          <p className="eyebrow">
+    <div className="admin-dashboard">
+
+      {/* Page heading */}
+
+      <div className="dashboard-header">
+        <div className="dashboard-heading-content">
+          <p className="dashboard-eyebrow">
             YOUR CHURCH AT A GLANCE
           </p>
 
-          <h1 className="page-title">
+          <h1 className="dashboard-title">
             Admin Dashboard
           </h1>
 
-          <p className="page-description">
+          <p className="dashboard-description">
             An overview of your lector community and
             monthly service schedule.
           </p>
         </div>
 
         <button
-          className="secondary-button"
+          className="dashboard-refresh-button"
           onClick={loadDashboard}
           disabled={loading}
         >
-          <RefreshCw size={16} />
-          Refresh
+          <RefreshCw
+            size={16}
+            className={loading ? "refresh-spinning" : ""}
+          />
+          <span>Refresh</span>
         </button>
       </div>
 
+      {/* Error message */}
+
       {error && (
-        <div className="notice-error">
-          {error}
+        <div className="dashboard-error">
+          <CircleAlert size={18} />
+          <span>{error}</span>
         </div>
       )}
 
       {loading ? (
-        <div className="loading-message">
-          Loading your dashboard...
+        <div className="dashboard-loading">
+          <RefreshCw size={23} className="refresh-spinning" />
+          <p>Loading your dashboard...</p>
         </div>
       ) : (
         <>
-          {/* Dashboard statistics */}
+          {/* Statistics */}
 
-          <div className="stats-grid">
-            {stats.map((stat) => {
-              const Icon = stat.icon;
-
-              return (
-                <div
-                  className="stat-card"
-                  key={stat.label}
-                >
-                  <div
-                    className={`stat-icon ${stat.color}`}
-                  >
-                    <Icon size={22} />
-                  </div>
-
-                  <p className="stat-label">
-                    {stat.label}
-                  </p>
-
-                  <h2>{stat.value}</h2>
-
-                  <p className="stat-note">
-                    {stat.note}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
+          <section className="dashboard-stats-grid">
+            {stats.map((stat) => (
+              <StatCard
+                key={stat.label}
+                {...stat}
+              />
+            ))}
+          </section>
 
           {/* Monthly assignments */}
 
-          <section className="content-card dashboard-section">
-            <div className="section-heading">
+          <section className="dashboard-panel">
+            <div className="dashboard-panel-header">
               <div>
-                <h2>Monthly assignments</h2>
+                <div className="dashboard-section-title">
+                  <CalendarCheck size={19} />
+                  <h2>Monthly assignments</h2>
+                </div>
 
-                <p>
-                  Choose a form to see its assignment
-                  progress.
+                <p className="dashboard-section-description">
+                  Monitor assignment progress for each monthly form.
                 </p>
               </div>
 
-              <select
-                value={selectedForm}
-                onChange={(event) =>
-                  changeForm(event.target.value)
-                }
-                className="form-select"
-              >
-                {forms.map((form) => (
-                  <option
-                    key={form.id}
-                    value={form.id}
-                  >
-                    {form.title ||
-                      `${form.month}/${form.year}`}
-                  </option>
-                ))}
-              </select>
+              <div className="dashboard-select-wrapper">
+                <CalendarDays size={17} />
+
+                <select
+                  value={selectedForm}
+                  onChange={(event) =>
+                    changeForm(event.target.value)
+                  }
+                  className="dashboard-form-select"
+                  disabled={forms.length === 0}
+                >
+                  {forms.map((form) => (
+                    <option
+                      key={form.id}
+                      value={form.id}
+                    >
+                      {form.title ||
+                        `${form.month}/${form.year}`}
+                    </option>
+                  ))}
+                </select>
+
+                <ChevronDown size={15} />
+              </div>
             </div>
 
             {assignments.length === 0 ? (
-              <p className="empty-state">
-                No assignment positions found for this
-                monthly form yet.
-              </p>
+              <div className="dashboard-empty-state">
+                <ClipboardCheck size={28} />
+                <p>
+                  No assignment positions found for this
+                  monthly form yet.
+                </p>
+              </div>
             ) : (
-              <div className="progress-area">
-                <div className="progress-labels">
-                  <span>Filled positions</span>
+              <div className="dashboard-progress-content">
+                <div className="dashboard-progress-summary">
+                  <div>
+                    <span className="dashboard-progress-caption">
+                      Assignment completion
+                    </span>
 
-                  <strong>
-                    {assignedPositions} / {assignments.length}
-                  </strong>
+                    <div className="dashboard-progress-percentage">
+                      {Math.round(progress)}%
+                      <span> completed</span>
+                    </div>
+                  </div>
+
+                  <div className="dashboard-progress-count">
+                    <strong>
+                      {assignedPositions}
+                      <span> / {assignments.length}</span>
+                    </strong>
+                    <small>Filled positions</small>
+                  </div>
                 </div>
 
-                <div className="progress-track">
+                <div
+                  className="dashboard-progress-track"
+                  role="progressbar"
+                  aria-valuenow={Math.round(progress)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
                   <div
-                    className="progress-fill"
+                    className="dashboard-progress-fill"
                     style={{
                       width: `${progress}%`,
                     }}
                   />
                 </div>
+
+                <div className="dashboard-progress-footer">
+                  <span>
+                    <span className="progress-dot filled-dot" />
+                    {assignedPositions} Assigned
+                  </span>
+
+                  <span>
+                    <span className="progress-dot empty-dot" />
+                    {unfilledPositions} Unfilled
+                  </span>
+
+                  <span>
+                    {assignments.length} Total positions
+                  </span>
+                </div>
               </div>
             )}
           </section>
 
-          {/* Google Form submissions search */}
+          {/* Availability submissions */}
 
-          <section className="content-card dashboard-section">
-            <div className="section-heading">
+          <section className="dashboard-panel">
+            <div className="dashboard-panel-header submissions-heading">
               <div>
-                <h2>
-                  <FileText
-                    size={20}
-                    style={{
-                      verticalAlign: "middle",
-                      marginRight: 8,
-                    }}
-                  />
-                  Lector Availability Submissions
-                </h2>
+                <div className="dashboard-section-title">
+                  <FileText size={19} />
+                  <h2>Lector Availability Submissions</h2>
+                </div>
 
-                <p>
-                  Search for a lector to view their
-                  submitted Google Form information.
+                <p className="dashboard-section-description">
+                  Search for a lector to view their submitted
+                  Google Form information.
                 </p>
+              </div>
+
+              <div className="dashboard-submission-count">
+                <strong>{submissions.length}</strong>
+                <span>Submissions</span>
               </div>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                marginBottom: 20,
-              }}
-            >
-              <Search size={20} />
+            {/* Search */}
+
+            <div className="dashboard-search-wrapper">
+              <Search size={19} />
 
               <input
                 type="text"
-                className="form-input"
                 placeholder="Search lector by name..."
                 value={searchName}
                 onChange={(event) =>
                   setSearchName(event.target.value)
                 }
-                style={{
-                  width: "100%",
-                }}
+                className="dashboard-search-input"
               />
+
+              {searchName && (
+                <button
+                  type="button"
+                  className="dashboard-clear-search"
+                  onClick={() => setSearchName("")}
+                  aria-label="Clear search"
+                >
+                  ×
+                </button>
+              )}
             </div>
 
-            <p className="stat-note">
-              {submissions.length} submission(s) found.
-              {" "}
-              {filteredSubmissions.length} matching your search.
-            </p>
+            <div className="dashboard-results-info">
+              Showing{" "}
+              <strong>{filteredSubmissions.length}</strong>{" "}
+              of{" "}
+              <strong>{submissions.length}</strong>{" "}
+              submissions
+            </div>
 
             {submissionLoading ? (
-              <div className="loading-message">
-                Loading submissions...
+              <div className="dashboard-loading dashboard-small-loading">
+                <RefreshCw
+                  size={21}
+                  className="refresh-spinning"
+                />
+                <p>Loading submissions...</p>
               </div>
             ) : filteredSubmissions.length === 0 ? (
-              <p className="empty-state">
-                {searchName
-                  ? "No lector submissions match your search."
-                  : "No submissions found for this monthly form."}
-              </p>
+              <div className="dashboard-empty-state">
+                <UsersRound size={28} />
+
+                <p>
+                  {searchName
+                    ? "No lector submissions match your search."
+                    : "No submissions found for this monthly form."}
+                </p>
+              </div>
             ) : (
-              <div
-                style={{
-                  display: "grid",
-                  gap: 16,
-                  marginTop: 16,
-                }}
-              >
+              <div className="dashboard-submissions-list">
                 {filteredSubmissions.map((submission) => {
                   const lectorName = getLectorName(
                     submission.lector,
@@ -448,119 +504,147 @@ export default function AdminDashboard() {
                   return (
                     <details
                       key={submission.submission_id}
-                      className="submission-card"
+                      className="dashboard-submission-card"
                     >
-                      <summary
-                        style={{
-                          cursor: "pointer",
-                          fontWeight: 600,
-                          padding: 8,
-                        }}
-                      >
-                        <UsersRound
-                          size={18}
-                          style={{
-                            verticalAlign: "middle",
-                            marginRight: 8,
-                          }}
-                        />
+                      <summary className="dashboard-submission-summary">
+                        <div className="dashboard-lector-avatar">
+                          <UserRound size={21} />
+                        </div>
 
-                        {lectorName}
+                        <div className="dashboard-lector-info">
+                          <strong>{lectorName}</strong>
 
-                        <span
-                          style={{
-                            marginLeft: 10,
-                            fontSize: 12,
-                            opacity: 0.7,
-                          }}
-                        >
+                          <span>
+                            Lector ID: {submission.lector_id}
+                          </span>
+                        </div>
+
+                        <span className="dashboard-view-label">
                           View submission
                         </span>
+
+                        <ChevronDown
+                          size={19}
+                          className="dashboard-submission-chevron"
+                        />
                       </summary>
 
-                      <div style={{ padding: 12 }}>
-                        <p>
-                          <strong>Submission ID:</strong>{" "}
-                          {submission.submission_id}
-                        </p>
+                      <div className="dashboard-submission-details">
 
-                        <p>
-                          <strong>Lector ID:</strong>{" "}
-                          {submission.lector_id}
-                        </p>
+                        <div className="submission-info-grid">
+                          <div className="submission-info-item">
+                            <span>Submission ID</span>
+                            <strong>
+                              {submission.submission_id}
+                            </strong>
+                          </div>
 
-                        <p>
-                          <strong>Day Availability:</strong>{" "}
-                          {submission.day_availability}
-                        </p>
+                          <div className="submission-info-item">
+                            <span>Lector ID</span>
+                            <strong>
+                              {submission.lector_id}
+                            </strong>
+                          </div>
 
-                        <p>
-                          <strong>Mass Preference:</strong>{" "}
-                          {submission.mass_preference}
-                        </p>
+                          <div className="submission-info-item">
+                            <span>Day Availability</span>
+                            <strong>
+                              {submission.day_availability || "Not specified"}
+                            </strong>
+                          </div>
 
-                        <p>
-                          <strong>Available Days:</strong>
-                        </p>
+                          <div className="submission-info-item">
+                            <span>Mass Preference</span>
+                            <strong>
+                              {submission.mass_preference || "Not specified"}
+                            </strong>
+                          </div>
+                        </div>
 
-                        {submission.available_days?.length > 0 ? (
-                          <ul>
-                            {submission.available_days.map(
-                              (day, index) => (
-                                <li key={index}>{day}</li>
-                              )
-                            )}
-                          </ul>
-                        ) : (
-                          <p>Not specified</p>
-                        )}
+                        <div className="submission-detail-section">
+                          <h4>
+                            <CalendarDays size={16} />
+                            Available Days
+                          </h4>
 
-                        <p>
-                          <strong>Responsibilities:</strong>
-                        </p>
+                          {submission.available_days?.length > 0 ? (
+                            <div className="submission-tags">
+                              {submission.available_days.map(
+                                (day, index) => (
+                                  <span key={index}>
+                                    {day}
+                                  </span>
+                                )
+                              )}
+                            </div>
+                          ) : (
+                            <p>Not specified</p>
+                          )}
+                        </div>
 
-                        {submission.responsibilities?.length > 0 ? (
-                          <ul>
-                            {submission.responsibilities.map(
-                              (responsibility, index) => (
-                                <li key={index}>
-                                  {responsibility}
-                                </li>
-                              )
-                            )}
-                          </ul>
-                        ) : (
-                          <p>None selected</p>
-                        )}
+                        <div className="submission-detail-section">
+                          <h4>
+                            <ClipboardCheck size={16} />
+                            Responsibilities
+                          </h4>
 
-                        <p>
-                          <strong>Unavailable Dates:</strong>
-                        </p>
+                          {submission.responsibilities?.length > 0 ? (
+                            <div className="submission-tags">
+                              {submission.responsibilities.map(
+                                (responsibility, index) => (
+                                  <span key={index}>
+                                    {responsibility}
+                                  </span>
+                                )
+                              )}
+                            </div>
+                          ) : (
+                            <p>None selected</p>
+                          )}
+                        </div>
 
-                        {submission.unavailable_dates?.length > 0 ? (
-                          <ul>
-                            {submission.unavailable_dates.map(
-                              (date, index) => (
-                                <li key={index}>
-                                  {date.start_date} to{" "}
-                                  {date.end_date}
+                        <div className="submission-detail-section">
+                          <h4>
+                            <Clock size={16} />
+                            Unavailable Dates
+                          </h4>
 
-                                  {date.reason
-                                    ? ` — ${date.reason}`
-                                    : ""}
-                                </li>
-                              )
-                            )}
-                          </ul>
-                        ) : (
-                          <p>No unavailable dates submitted.</p>
-                        )}
+                          {submission.unavailable_dates?.length > 0 ? (
+                            <div className="submission-dates-list">
+                              {submission.unavailable_dates.map(
+                                (date, index) => (
+                                  <div
+                                    className="submission-date-item"
+                                    key={index}
+                                  >
+                                    <CalendarDays size={16} />
 
-                        <p>
-                          <strong>Additional Requests:</strong>{" "}
-                          {submission.additional_requests ||
-                            "None"}
-                        </p>
+                                    <div>
+                                      <strong>
+                                        {date.start_date} to {date.end_date}
+                                      </strong>
+
+                                      {date.reason && (
+                                        <span>{date.reason}</span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              )}
+                            </div>
+                          ) : (
+                            <p>No unavailable dates submitted.</p>
+                          )}
+                        </div>
+
+                        <div className="submission-detail-section">
+                          <h4>Additional Requests</h4>
+
+                          <p className="submission-additional-requests">
+                            {submission.additional_requests || "None"}
+                          </p>
+                        </div>
+
                       </div>
                     </details>
                   );
@@ -571,55 +655,65 @@ export default function AdminDashboard() {
 
           {/* Quick actions */}
 
-          <section className="quick-actions">
-            <Link
-              to="/admin/lectors"
-              className="quick-action-card"
-            >
-              <UsersRound size={23} />
+          <section className="dashboard-quick-actions-section">
+            <div className="dashboard-quick-heading">
+              <h2>Quick Actions</h2>
 
-              <div>
-                <h3>Manage Lectors</h3>
-                <p>
-                  Add, edit or deactivate lector accounts.
-                </p>
-              </div>
+              <p>
+                Quickly access the main administration sections.
+              </p>
+            </div>
 
-              <ArrowRight size={18} />
-            </Link>
+            <div className="dashboard-quick-actions-grid">
 
-            <Link
-              to="/admin/scheduling"
-              className="quick-action-card"
-            >
-              <CalendarDays size={23} />
+              <Link
+                to="/admin/lectors"
+                className="dashboard-action-card"
+              >
+                <div className="dashboard-action-icon action-rose">
+                  <UsersRound size={22} />
+                </div>
 
-              <div>
-                <h3>Manage Schedule</h3>
-                <p>
-                  Close forms, select frozen dates and
-                  assign duties.
-                </p>
-              </div>
+                <div className="dashboard-action-content">
+                  <h3>Manage Lectors</h3>
 
-              <ArrowRight size={18} />
-            </Link>
+                  <p>
+                    Add, edit or deactivate lector accounts.
+                  </p>
+                </div>
 
-            <Link
-              to="/availability"
-              className="quick-action-card"
-            >
-              <ClipboardCheck size={23} />
+                <ArrowRight
+                  size={19}
+                  className="dashboard-action-arrow"
+                />
+              </Link>
 
-              <div>
-                <h3>Lector Availability</h3>
-                <p>
-                  Open the availability submission page.
-                </p>
-              </div>
+              <Link
+                to="/admin/scheduling"
+                className="dashboard-action-card"
+              >
+                <div className="dashboard-action-icon action-sage">
+                  <CalendarDays size={22} />
+                </div>
 
-              <ArrowRight size={18} />
-            </Link>
+                <div className="dashboard-action-content">
+                  <h3>Manage Schedule</h3>
+
+                  <p>
+                    Close forms, select frozen dates and
+                    assign duties.
+                  </p>
+                </div>
+
+                <ArrowRight
+                  size={19}
+                  className="dashboard-action-arrow"
+                />
+              </Link>
+
+             
+
+            </div>
           </section>
         </>
       )}

@@ -4,6 +4,8 @@ source .venv/bin/activate
   "password": "ChurchBuddy@2026"
 }
 
+ngrok http 8000
+
 CREATE_SECRET: e30bd992692c7d3302c3c45678d6cd67f149c7920dc6401f053d54753d46830a
 WEBHOOK_SECRET: eeba5c1a14a4eb965e6454deeac264b4cbe50e38552695d8fc65808c79428d91
 
@@ -37,3 +39,30 @@ LEFT JOIN unavailable_dates ud
     ON ud.submission_id = s.id
 WHERE s.monthly_form_id = 2
 ORDER BY l.id;
+
+
+HOW TO RUN BACKEND
+
+Terminal 1 – Start backend
+Open VS Code terminal and run:
+
+1. Go to backend folder
+cd ~/Desktop/ChurchBuddy/backend
+
+
+2. Activate virtual environment
+source .venv/bin/activate
+
+
+3. Start FastAPI
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+
+Backend running
+Open: http://localhost:8000/docs
+Terminal 2 – Start ngrok
+Open a second terminal and run:
+ngrok http 8000
+
+
+Copy the HTTPS forwarding URL displayed by ngrok.
