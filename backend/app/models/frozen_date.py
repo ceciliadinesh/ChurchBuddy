@@ -1,7 +1,7 @@
-
 from sqlalchemy import (
     Column,
     Integer,
+    String,
     Date,
     ForeignKey,
     Text,
@@ -14,6 +14,12 @@ from app.database import Base
 
 
 class FrozenDate(Base):
+    """
+    A frozen DATE + MASS TIME. The same date can have several rows
+    (e.g. 7:00 AM frozen and 6:00 PM frozen), but each date/time
+    pair can only be frozen once.
+    """
+
     __tablename__ = "frozen_dates"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -26,6 +32,10 @@ class FrozenDate(Base):
 
     frozen_date = Column(Date, nullable=False)
 
+    # Which Mass time is frozen:
+    # "7:00 AM", "7:30 AM", "9:45 AM" or "6:00 PM"
+    frozen_time = Column(String(20), nullable=False, default="7:00 AM")
+
     reason = Column(Text, nullable=True)
 
     created_at = Column(
@@ -37,6 +47,7 @@ class FrozenDate(Base):
         UniqueConstraint(
             "monthly_form_id",
             "frozen_date",
-            name="uq_frozen_date_per_month"
+            "frozen_time",
+            name="uq_frozen_date_time_per_month"
         ),
     )

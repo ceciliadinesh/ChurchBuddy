@@ -1,4 +1,3 @@
-
 import json
 import hmac
 import re
@@ -107,35 +106,12 @@ def parse_unavailable_dates(value: Any, month: int, year: int):
     return results
 
 
-@router.post("/{monthly_form_id}/create")
-def create_google_form(
-    monthly_form_id: int,
-    db: Session = Depends(get_db)
-):
-    monthly_form = db.query(MonthlyForm).filter(
-        MonthlyForm.id == monthly_form_id
-    ).first()
+# --------------------------------------------------
+# GOOGLE APPS SCRIPT HELPERS
+# --------------------------------------------------
 
-    if not monthly_form:
-        raise HTTPException(
-            status_code=404,
-            detail="Monthly form not found."
-        )
-
-    if not monthly_form.is_open:
-        raise HTTPException(
-            status_code=400,
-            detail="This monthly form is closed."
-        )
-
-    payload = {
-        "action": "create_form",
-        "secret": settings.GOOGLE_APPS_SCRIPT_CREATE_SECRET,
-        "monthly_form_id": monthly_form.id,
-        "month": monthly_form.month,
-        "year": monthly_form.year
-    }
-
+def call_apps_script(payload: dict) -> dict:
+    """POST a JSON payload to the Apps Script web app and return its result."""
     request = Request(
         settings.GOOGLE_APPS_SCRIPT_URL,
         data=json.dumps(payload).encode("utf-8"),
@@ -162,8 +138,63 @@ def create_google_form(
     if not result.get("success"):
         raise HTTPException(
             status_code=502,
-            detail=result.get("message", "Google Form creation failed.")
+            detail=result.get("message", "Google Apps Script request failed.")
         )
+
+    return result
+
+
+def set_google_form_accepting(monthly_form: MonthlyForm, accepting: bool):
+    """
+    Open or close the linked Google Form.
+    Does nothing if no Google Form has been created yet.
+
+    Call this from the monthly-forms close/reopen endpoints BEFORE
+    changing is_open, so a Google failure leaves the database untouched.
+    """
+    if not monthly_form.google_form_id:
+        return
+
+    call_apps_script({
+        "action": "set_accepting_responses",
+        "secret": settings.GOOGLE_APPS_SCRIPT_CREATE_SECRET,
+        "google_form_id": monthly_form.google_form_id,
+        "accepting": accepting
+    })
+
+
+# --------------------------------------------------
+# ROUTES
+# --------------------------------------------------
+
+@router.post("/{monthly_form_id}/create")
+def create_google_form(
+    monthly_form_id: int,
+    db: Session = Depends(get_db)
+):
+    monthly_form = db.query(MonthlyForm).filter(
+        MonthlyForm.id == monthly_form_id
+    ).first()
+
+    if not monthly_form:
+        raise HTTPException(
+            status_code=404,
+            detail="Monthly form not found."
+        )
+
+    if not monthly_form.is_open:
+        raise HTTPException(
+            status_code=400,
+            detail="This monthly form is closed."
+        )
+
+    result = call_apps_script({
+        "action": "create_form",
+        "secret": settings.GOOGLE_APPS_SCRIPT_CREATE_SECRET,
+        "monthly_form_id": monthly_form.id,
+        "month": monthly_form.month,
+        "year": monthly_form.year
+    })
 
     required_fields = ["form_id", "form_url", "edit_url"]
 
@@ -194,6 +225,39 @@ def create_google_form(
         "google_form_id": monthly_form.google_form_id,
         "form_url": monthly_form.google_form_url,
         "edit_url": monthly_form.google_form_edit_url
+    }
+
+
+@router.post("/{monthly_form_id}/sync-status")
+def sync_google_form_status(
+    monthly_form_id: int,
+    db: Session = Depends(get_db)
+):
+    """Make the Google Form's accepting-responses state match is_open."""
+    monthly_form = db.query(MonthlyForm).filter(
+        MonthlyForm.id == monthly_form_id
+    ).first()
+
+    if not monthly_form:
+        raise HTTPException(
+            status_code=404,
+            detail="Monthly form not found."
+        )
+
+    if not monthly_form.google_form_id:
+        return {"synced": False, "message": "No Google Form to update."}
+
+    accepting = bool(monthly_form.is_open)
+    set_google_form_accepting(monthly_form, accepting)
+
+    return {
+        "synced": True,
+        "accepting": accepting,
+        "message": (
+            "Google Form is now accepting responses."
+            if accepting
+            else "Google Form is now closed."
+        )
     }
 
 

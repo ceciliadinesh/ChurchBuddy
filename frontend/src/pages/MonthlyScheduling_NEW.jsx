@@ -17,16 +17,15 @@ import {
     Copy,
 } from "lucide-react";
 import "./MonthlyScheduling.css";
-const API_URL =
-    import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
 const ROSTER_SLOTS = ["7:00 AM", "7:30 AM", "9:45 AM", "6:00 PM"];
-
 const READING_ORDER = ["Ang.", "Rdng.1", "Rdng.2", "P.S.", "POF"];
-
 const RESPONSIBILITY_ORDER = { Angelus: 1, Reading: 2, POF: 3 };
-
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const SUNDAY_SPECIAL_TIMES = ["7:30 AM", "9:45 AM"];
 
 // --------------------------------------------------
 // GENERAL HELPERS
@@ -55,7 +54,11 @@ function getLectorName(lector, lectorId) {
 }
 
 function getAssignmentName(item) {
-    return item.lector_name || getLectorName(item.lector, item.lector_id);
+    return (
+        item.special_text ||
+        item.lector_name ||
+        getLectorName(item.lector, item.lector_id)
+    );
 }
 
 function getMassTime(item) {
@@ -68,10 +71,10 @@ function getMassTime(item) {
     );
 }
 
-// Accepts "6:00 PM", "06:00 PM", "18:00", "18:00:00"
 function parseMassTime(value) {
     const raw = String(value || "").trim().toUpperCase();
     const match = raw.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/);
+
     if (!match) return null;
 
     let hour = Number(match[1]);
@@ -134,9 +137,7 @@ function getReadingLabel(item) {
 }
 
 function formatRosterDate(dateValue) {
-    if (!dateValue) {
-        return { date: "", day: "" };
-    }
+    if (!dateValue) return { date: "", day: "" };
 
     const date = new Date(`${String(dateValue).slice(0, 10)}T12:00:00`);
 
@@ -145,18 +146,13 @@ function formatRosterDate(dateValue) {
     }
 
     return {
-        date: date
-            .toLocaleDateString("en-GB", {
-                day: "2-digit",
-                month: "short",
-            })
-            .toUpperCase(),
-
-        day: date
-            .toLocaleDateString("en-US", {
-                weekday: "short",
-            })
-            .toUpperCase(),
+        date: date.toLocaleDateString("en-GB", {
+            day: "2-digit",
+            month: "short",
+        }).toUpperCase(),
+        day: date.toLocaleDateString("en-US", {
+            weekday: "short",
+        }).toUpperCase(),
     };
 }
 
@@ -173,7 +169,54 @@ function getDateOnly(value) {
     return String(value || "").slice(0, 10);
 }
 
-// Copies text to the clipboard, with a fallback for non-HTTPS / older browsers
+// Time chosen when the date was frozen (defaults to 7:00 AM for old records)
+function getFrozenTime(item) {
+    return formatMassTime(item?.frozen_time || "7:00 AM");
+}
+
+// All frozen date+time entries for one calendar date
+function getFrozenForDate(frozenDates, dateStr) {
+    return frozenDates.filter(
+        (item) => getDateOnly(item.frozen_date) === dateStr
+    );
+}
+
+// Is this exact date + Mass time frozen?
+function isSlotFrozen(frozenDates, dateStr, timeLabel) {
+    return frozenDates.some(
+        (item) =>
+            getDateOnly(item.frozen_date) === dateStr &&
+            getFrozenTime(item) === timeLabel
+    );
+}
+
+// Sunday note helpers
+
+function getSundaySlotDate(slot) {
+    return getDateOnly(
+        slot.slot_date ||
+        slot.date ||
+        slot.assignment_date
+    );
+}
+
+function getSundaySlotTime(slot) {
+    return formatMassTime(
+        slot.mass_time ||
+        slot.mass_slot?.mass_time ||
+        slot.mass_slot?.time ||
+        slot.slot_time ||
+        ""
+    );
+}
+
+function isSundaySlot(slot, time) {
+    return (
+        getSundaySlotTime(slot) === time &&
+        Boolean(getSundaySlotDate(slot))
+    );
+}
+
 async function copyText(text) {
     try {
         await navigator.clipboard.writeText(text);
@@ -182,6 +225,7 @@ async function copyText(text) {
         textarea.value = text;
         textarea.style.position = "fixed";
         textarea.style.opacity = "0";
+
         document.body.appendChild(textarea);
         textarea.select();
         document.execCommand("copy");
@@ -209,19 +253,28 @@ function getRosterSlotIndex(item) {
     return key in map ? map[key] : -1;
 }
 
-function buildRosterGroups(assignments) {
+function buildRosterGroups(assignments, sundaySlots = [], frozenDates = []) {
     const byDate = new Map();
 
+    // Normal assignments
     assignments.forEach((item) => {
         const date = getDateOnly(item.assignment_date || item.date);
-
         if (!date) return;
 
-        if (!byDate.has(date)) {
-            byDate.set(date, []);
-        }
-
+        if (!byDate.has(date)) byDate.set(date, []);
         byDate.get(date).push(item);
+    });
+
+    // Include Sunday note dates
+    sundaySlots.forEach((slot) => {
+        const date = getSundaySlotDate(slot);
+        if (date && !byDate.has(date)) byDate.set(date, []);
+    });
+
+    // Include frozen dates
+    frozenDates.forEach((item) => {
+        const date = getDateOnly(item.frozen_date);
+        if (date && !byDate.has(date)) byDate.set(date, []);
     });
 
     return [...byDate.entries()]
@@ -232,10 +285,7 @@ function buildRosterGroups(assignments) {
 
             items.forEach((item) => {
                 const label = getReadingLabel(item);
-
-                if (label) {
-                    readingLabels.add(label);
-                }
+                if (label) readingLabels.add(label);
 
                 const slot = getRosterSlotIndex(item);
 
@@ -255,44 +305,98 @@ function buildRosterGroups(assignments) {
                 return ai - bi;
             });
 
-            // One row per reading, each name placed on its own reading row.
-            const rows =
-                labels.length > 0
-                    ? labels.map((label) => ({
-                        reading: label,
-                        slots: slotItems.map((slot) =>
-                            slot
-                                .filter(
-                                    (item) =>
-                                        getReadingLabel(item) === label &&
-                                        item.lector_id != null
+            const rows = labels.map((label) => ({
+                reading: label,
+                slots: slotItems.map((slot) =>
+                    slot
+                        .filter(
+                            (item) =>
+                                getReadingLabel(item) === label &&
+                                (
+                                    item.lector_id != null ||
+                                    Boolean(item.special_text)
                                 )
-                                .map(getAssignmentName)
-                                .join(", ")
-                        ),
-                    }))
-                    : [{ reading: "", slots: ["", "", "", ""] }];
+                        )
+                        .map((item) => ({
+                            text: getAssignmentName(item),
+                            special: Boolean(item.special_text),
+                        }))
+                ),
+            }));
 
-            // Masses whose time is not one of the four roster columns.
-            const unknownSlotItems = items.filter(
-                (item) => getRosterSlotIndex(item) < 0
+            // Sunday 7:30 AM and 9:45 AM notes go into the existing Rdng.1 row
+            const dateSundaySlots = sundaySlots.filter(
+                (slot) => getSundaySlotDate(slot) === dateValue
             );
 
-            unknownSlotItems.forEach((item, index) => {
-                const rowIndex = index % rows.length;
+            dateSundaySlots.forEach((slot) => {
+                const note = String(slot.note || "").trim();
+                if (!note) return;
 
-                const extra = [
-                    formatMassTime(getMassTime(item)),
-                    getReadingLabel(item),
-                    item.lector_id != null ? getAssignmentName(item) : "",
-                ]
-                    .filter(Boolean)
-                    .join(" — ");
+                const time = getSundaySlotTime(slot);
+                const columnIndex = ROSTER_SLOTS.indexOf(time);
 
-                rows[rowIndex].slots[0] = [rows[rowIndex].slots[0], extra]
-                    .filter(Boolean)
-                    .join("; ");
+                if (columnIndex === -1) return;
+
+                let readingRow = rows.find(
+                    (row) => row.reading === "Rdng.1"
+                );
+
+                if (!readingRow) {
+                    readingRow = {
+                        reading: "Rdng.1",
+                        slots: [[], [], [], []],
+                    };
+
+                    rows.push(readingRow);
+                }
+
+                readingRow.slots[columnIndex].push({
+                    text: note,
+                    special: true,
+                });
             });
+
+            // Frozen notes (one per frozen time) go into the matching
+            // time column of an existing row
+            const frozenForDate = getFrozenForDate(frozenDates, dateValue);
+
+            frozenForDate.forEach((frozenDate) => {
+                const frozenNote = frozenDate.reason?.trim();
+                if (!frozenNote) return;
+
+                const columnIndex = ROSTER_SLOTS.indexOf(
+                    getFrozenTime(frozenDate)
+                );
+
+                if (columnIndex === -1) return;
+
+                let readingRow =
+                    rows.find((row) => row.reading === "Rdng.1") ||
+                    rows[0];
+
+                if (!readingRow) {
+                    readingRow = {
+                        reading: "Rdng.1",
+                        slots: [[], [], [], []],
+                    };
+
+                    rows.push(readingRow);
+                }
+
+                readingRow.slots[columnIndex].push({
+                    text: frozenNote,
+                    special: true,
+                });
+            });
+
+            // Keep one row for dates that have no assignments or notes
+            if (rows.length === 0) {
+                rows.push({
+                    reading: "",
+                    slots: [[], [], [], []],
+                });
+            }
 
             return {
                 dateValue,
@@ -306,8 +410,17 @@ function buildRosterGroups(assignments) {
 // DOWNLOAD DOCUMENT
 // --------------------------------------------------
 
-function buildRosterDocument(form, assignments) {
-    const groups = buildRosterGroups(assignments);
+function buildRosterDocument(
+    form,
+    assignments,
+    sundaySlots = [],
+    frozenDates = []
+) {
+    const groups = buildRosterGroups(
+        assignments,
+        sundaySlots,
+        frozenDates
+    );
 
     const monthYear =
         form?.title ||
@@ -324,42 +437,50 @@ function buildRosterDocument(form, assignments) {
     const bodyRows = groups
         .map((group) =>
             group.rows
-                .map(
-                    (row, index) => `
-      <tr class="${index === 0 ? "date-start" : ""}">
-        ${index === 0
-                            ? `
-              <td class="date" rowspan="${group.rows.length}">
-                ${escapeHtml(group.date)}
-              </td>
-              <td class="day" rowspan="${group.rows.length}">
-                ${escapeHtml(group.day)}
-              </td>
-            `
-                            : ""
-                        }
+                .map((row, index) => {
+                    const dateCells = index === 0
+                        ? `
+                                <td class="date" rowspan="${group.rows.length}">
+                                    ${escapeHtml(group.date)}
+                                </td>
+                                <td class="day" rowspan="${group.rows.length}">
+                                    ${escapeHtml(group.day)}
+                                </td>
+                            `
+                        : "";
 
-        <td class="reading">
-          ${escapeHtml(row.reading)}
-        </td>
+                    return `
+                            <tr class="${index === 0 ? "date-start" : ""}">
+                                ${dateCells}
 
-        ${row.slots
-                            .map((name) => {
-                                const special =
-                                    /community|school|liturgy team|youth|sodality/i.test(
-                                        name
-                                    );
+                                <td class="reading">
+                                    ${escapeHtml(row.reading)}
+                                </td>
 
-                                return `
-            <td class="${special ? "special" : "person"}">
-              ${escapeHtml(name)}
-            </td>
-          `;
-                            })
-                            .join("")}
-      </tr>
-    `
-                )
+                                ${row.slots.map((slotItems) => {
+                        const content = slotItems
+                            .map((item) => `
+                                            <div class="${item.special
+                                    ? "special-text"
+                                    : "person-text"
+                                }">
+                                                ${escapeHtml(item.text)}
+                                            </div>
+                                        `)
+                            .join("");
+
+                        return `
+                                        <td class="${slotItems.some((item) => item.special)
+                                ? "special"
+                                : "person"
+                            }">
+                                            ${content}
+                                        </td>
+                                    `;
+                    }).join("")}
+                            </tr>
+                        `;
+                })
                 .join("")
         )
         .join("");
@@ -369,17 +490,9 @@ function buildRosterDocument(form, assignments) {
 <head>
 <meta charset="utf-8">
 <title>Lectors List - ${escapeHtml(monthYear)}</title>
-
 <style>
-  @page {
-    size: A4 landscape;
-    margin: 10mm;
-  }
-
-  * {
-    box-sizing: border-box;
-  }
-
+  @page { size: A4 landscape; margin: 10mm; }
+  * { box-sizing: border-box; }
   body {
     margin: 0;
     padding: 18px;
@@ -387,14 +500,12 @@ function buildRosterDocument(form, assignments) {
     background: #fff;
     font-family: Arial, Helvetica, sans-serif;
   }
-
   h1 {
     margin: 0 0 18px;
     text-align: center;
     font-size: 21px;
     font-weight: 700;
   }
-
   table {
     width: 100%;
     border-collapse: collapse;
@@ -402,57 +513,48 @@ function buildRosterDocument(form, assignments) {
     font-size: 12px;
     background: #fff;
   }
-
   th, td {
     border: 1px solid #222;
     padding: 5px 6px;
     height: 27px;
     vertical-align: middle;
   }
-
   th {
     background: #dedede;
     text-align: center;
     font-weight: 700;
     border: 2px solid #111;
   }
-
   td.date, td.day {
     text-align: center;
     vertical-align: middle;
     background: #f1f1f1;
   }
-
-  td.reading {
-    text-align: left;
-    width: 8%;
-  }
-
-  td.person {
-    text-align: left;
-    overflow-wrap: anywhere;
-  }
-
+  td.reading { text-align: left; width: 8%; }
+  td.person { text-align: left; overflow-wrap: anywhere; }
   td.special {
     text-align: center;
+    vertical-align: middle;
     font-weight: 700;
+    overflow-wrap: anywhere;
   }
-
-  tr.date-start td {
-    border-top: 2px solid #111;
+  .special-text {
+    text-align: center;
+    font-weight: 700;
+    width: 100%;
   }
-
+  .person-text {
+    text-align: left;
+    font-weight: 400;
+    width: 100%;
+  }
+  tr.date-start td { border-top: 2px solid #111; }
   th:nth-child(1) { width: 8%; }
   th:nth-child(2) { width: 7%; }
   th:nth-child(3) { width: 8%; }
-
-  th:nth-child(4),
-  th:nth-child(5),
-  th:nth-child(6),
-  th:nth-child(7) {
+  th:nth-child(4), th:nth-child(5), th:nth-child(6), th:nth-child(7) {
     width: 19.25%;
   }
-
   @media print {
     body { padding: 0; }
     thead { display: table-header-group; }
@@ -460,10 +562,8 @@ function buildRosterDocument(form, assignments) {
   }
 </style>
 </head>
-
 <body>
 <h1>LECTORS LIST FOR ${escapeHtml(monthYear).toUpperCase()}</h1>
-
 <table>
   <thead>
     <tr>
@@ -473,10 +573,7 @@ function buildRosterDocument(form, assignments) {
       ${ROSTER_SLOTS.map((slot) => `<th>${slot}</th>`).join("")}
     </tr>
   </thead>
-
-  <tbody>
-    ${bodyRows}
-  </tbody>
+  <tbody>${bodyRows}</tbody>
 </table>
 </body>
 </html>`;
@@ -486,7 +583,7 @@ function buildRosterDocument(form, assignments) {
 // CALENDAR (MON-SUN GRID)
 // --------------------------------------------------
 
-function buildCalendarWeeks(month, year, assignments) {
+function buildCalendarWeeks(month, year, assignments, sundaySlots) {
     if (!month || !year) return [];
 
     const m = Number(month);
@@ -494,12 +591,25 @@ function buildCalendarWeeks(month, year, assignments) {
     const pad = (n) => String(n).padStart(2, "0");
 
     const byDate = new Map();
+    const sundaySlotsByDate = new Map();
 
     assignments.forEach((item) => {
         const d = getDateOnly(item.assignment_date || item.date);
         if (!d) return;
+
         if (!byDate.has(d)) byDate.set(d, []);
         byDate.get(d).push(item);
+    });
+
+    sundaySlots.forEach((slot) => {
+        const d = getSundaySlotDate(slot);
+        if (!d) return;
+
+        if (!sundaySlotsByDate.has(d)) {
+            sundaySlotsByDate.set(d, []);
+        }
+
+        sundaySlotsByDate.get(d).push(slot);
     });
 
     byDate.forEach((list) =>
@@ -509,23 +619,30 @@ function buildCalendarWeeks(month, year, assignments) {
 
             const ra = RESPONSIBILITY_ORDER[a.responsibility] || 99;
             const rb = RESPONSIBILITY_ORDER[b.responsibility] || 99;
+
             if (ra !== rb) return ra - rb;
 
             return (a.position_number || 0) - (b.position_number || 0);
         })
     );
 
-    const offset = (new Date(y, m - 1, 1).getDay() + 6) % 7; // Monday first
+    const offset = (new Date(y, m - 1, 1).getDay() + 6) % 7;
     const daysInMonth = new Date(y, m, 0).getDate();
 
     const cells = [
         ...Array(offset).fill(null),
         ...Array.from({ length: daysInMonth }, (_, i) => {
             const dateStr = `${y}-${pad(m)}-${pad(i + 1)}`;
+            const date = new Date(`${dateStr}T12:00:00`);
+            const isSunday = date.getDay() === 0;
+
             return {
                 dateStr,
                 dayNumber: i + 1,
                 items: byDate.get(dateStr) || [],
+                sundaySlots: isSunday
+                    ? sundaySlotsByDate.get(dateStr) || []
+                    : [],
             };
         }),
     ];
@@ -533,6 +650,7 @@ function buildCalendarWeeks(month, year, assignments) {
     while (cells.length % 7 !== 0) cells.push(null);
 
     const weeks = [];
+
     for (let i = 0; i < cells.length; i += 7) {
         weeks.push(cells.slice(i, i + 7));
     }
@@ -550,14 +668,30 @@ export default function MonthlyScheduling() {
     const [selectedId, setSelectedId] = useState("");
     const [assignments, setAssignments] = useState([]);
 
+    // Sunday special Mass notes
+    const [sundaySlots, setSundaySlots] = useState([]);
+    const [selectedSundaySlot, setSelectedSundaySlot] = useState(null);
+    const [sundayNoteDraft, setSundayNoteDraft] = useState("");
+    const [editingSundayNote, setEditingSundayNote] = useState(false);
+
     const [selectedDay, setSelectedDay] = useState(null);
     const [editingAssignmentId, setEditingAssignmentId] = useState(null);
     const [manualLectorId, setManualLectorId] = useState("");
     const [overrideAvailability, setOverrideAvailability] = useState(false);
+    const [assignmentMode, setAssignmentMode] = useState("lector");
+    const [specialText, setSpecialText] = useState("");
 
+    // Frozen dates (add form)
     const [frozenDates, setFrozenDates] = useState([]);
     const [dateInput, setDateInput] = useState("");
     const [freezeDone, setFreezeDone] = useState(false);
+    const [freezeTimeInput, setFreezeTimeInput] = useState("7:00 AM");
+    const [freezeNoteInput, setFreezeNoteInput] = useState("");
+
+    // Frozen date note editor (day panel)
+    const [editingFrozenId, setEditingFrozenId] = useState(null);
+    const [frozenNoteDraft, setFrozenNoteDraft] = useState("");
+    const [frozenTimeDraft, setFrozenTimeDraft] = useState("7:00 AM");
 
     const [loading, setLoading] = useState(true);
     const [working, setWorking] = useState(false);
@@ -601,17 +735,17 @@ export default function MonthlyScheduling() {
                     detail += ` ${data.detail.warnings.join(" ")}`;
                 }
             } else if (Array.isArray(data.detail)) {
-                // FastAPI validation errors
                 detail = data.detail
                     .map((d) => d.msg || JSON.stringify(d))
                     .join(" ");
             }
 
-            const error = new Error(
+            const requestError = new Error(
                 detail || `Request failed (${response.status}).`
             );
-            error.detail = data.detail;
-            throw error;
+
+            requestError.detail = data.detail;
+            throw requestError;
         }
 
         return data;
@@ -624,6 +758,7 @@ export default function MonthlyScheduling() {
             setAssignments([]);
             return;
         }
+
         setAssignments(getList(await request(`/assignments/${id}`)));
     }
 
@@ -632,8 +767,161 @@ export default function MonthlyScheduling() {
             setFrozenDates([]);
             return;
         }
+
         setFrozenDates(getList(await request(`/frozen-dates/${id}`)));
     }
+
+    async function loadSundaySlots(id) {
+        if (!id) {
+            setSundaySlots([]);
+            return;
+        }
+
+        setSundaySlots(getList(await request(`/sunday-slots/${id}`)));
+    }
+
+    // ---------------- SUNDAY NOTE EDITING ----------------
+
+    function startEditingSundayNote(slot) {
+        setSelectedSundaySlot(slot);
+        setSundayNoteDraft(slot.note || "");
+        setEditingSundayNote(true);
+        setError("");
+        setMessage("");
+    }
+
+    function cancelEditingSundayNote() {
+        setSelectedSundaySlot(null);
+        setSundayNoteDraft("");
+        setEditingSundayNote(false);
+    }
+
+    async function saveSundayNote() {
+        if (!selectedSundaySlot || !selectedId) return;
+
+        const slotDate = getSundaySlotDate(selectedSundaySlot);
+        const massSlotId = selectedSundaySlot.mass_slot_id;
+
+        if (!slotDate || !massSlotId) {
+            setError(
+                "The Sunday Mass slot is missing its date or Mass slot ID. Check the Sunday slots API response."
+            );
+            return;
+        }
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            await request(`/sunday-slots/${selectedId}`, {
+                method: "PUT",
+                body: JSON.stringify({
+                    slot_date: slotDate,
+                    mass_slot_id: massSlotId,
+                    note: sundayNoteDraft.trim() || null,
+                }),
+            });
+
+            await loadSundaySlots(selectedId);
+
+            setEditingSundayNote(false);
+            setSelectedSundaySlot(null);
+            setSundayNoteDraft("");
+            setMessage(
+                `${getSundaySlotTime(selectedSundaySlot)} note saved successfully.`
+            );
+        } catch (err) {
+            setError(err.message || "Could not save Sunday Mass note.");
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    // ---------------- FROZEN DATE NOTE EDITING ----------------
+
+    function startEditingFrozenNote(item) {
+        setEditingFrozenId(item.id);
+        setFrozenNoteDraft(item.reason || "");
+        setFrozenTimeDraft(getFrozenTime(item));
+        setError("");
+        setMessage("");
+    }
+
+    function cancelEditingFrozenNote() {
+        setEditingFrozenId(null);
+        setFrozenNoteDraft("");
+        setFrozenTimeDraft("7:00 AM");
+    }
+
+    async function saveFrozenNote() {
+        const frozenDate = frozenDates.find(
+            (item) => item.id === editingFrozenId
+        );
+
+        if (!frozenDate) {
+            setError("Could not find this frozen date.");
+            return;
+        }
+
+        if (frozenNoteDraft.length > 100) {
+            setError("Frozen date note cannot exceed 100 characters.");
+            return;
+        }
+
+        // Changing the time must not collide with another frozen time
+        // on the same date.
+        const clash = frozenDates.some(
+            (item) =>
+                item.id !== frozenDate.id &&
+                getDateOnly(item.frozen_date) ===
+                getDateOnly(frozenDate.frozen_date) &&
+                getFrozenTime(item) === formatMassTime(frozenTimeDraft)
+        );
+
+        if (clash) {
+            setError("That date and time has already been frozen.");
+            return;
+        }
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            const result = await request(`/frozen-dates/${frozenDate.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({
+                    reason: frozenNoteDraft.trim() || null,
+                    frozen_time: frozenTimeDraft,
+                }),
+            });
+
+            setFrozenDates((prev) =>
+                prev.map((item) =>
+                    item.id === frozenDate.id
+                        ? {
+                            ...item,
+                            reason:
+                                result.reason ??
+                                (frozenNoteDraft.trim() || null),
+                            frozen_time:
+                                result.frozen_time ?? frozenTimeDraft,
+                        }
+                        : item
+                )
+            );
+
+            cancelEditingFrozenNote();
+            setMessage("Frozen date note saved successfully.");
+        } catch (err) {
+            setError(err.message || "Could not save frozen date note.");
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    // ---------------- LOAD FORMS ----------------
 
     async function loadForms() {
         setLoading(true);
@@ -655,6 +943,10 @@ export default function MonthlyScheduling() {
                 setSelectedId("");
                 setAssignments([]);
                 setFrozenDates([]);
+                setSundaySlots([]);
+                setSelectedDay(null);
+                cancelEditingFrozenNote();
+                cancelEditingSundayNote();
                 return;
             }
 
@@ -671,6 +963,7 @@ export default function MonthlyScheduling() {
             await Promise.all([
                 loadAssignments(nextId),
                 loadFrozenDates(nextId),
+                loadSundaySlots(nextId),
             ]);
         } catch (err) {
             setError(err.message);
@@ -710,7 +1003,7 @@ export default function MonthlyScheduling() {
                 localStorage.removeItem(`freeze_done_${selectedId}`);
             }
         } catch {
-            /* ignore */
+            // Ignore local storage errors.
         }
     }
 
@@ -718,6 +1011,8 @@ export default function MonthlyScheduling() {
         setEditingAssignmentId(null);
         setManualLectorId("");
         setOverrideAvailability(false);
+        setAssignmentMode("lector");
+        setSpecialText("");
     }
 
     async function selectForm(id) {
@@ -725,11 +1020,18 @@ export default function MonthlyScheduling() {
         setMessage("");
         setError("");
         setDateInput("");
+        setFreezeNoteInput("");
         setSelectedDay(null);
         cancelEditing();
+        cancelEditingFrozenNote();
+        cancelEditingSundayNote();
 
         try {
-            await Promise.all([loadAssignments(id), loadFrozenDates(id)]);
+            await Promise.all([
+                loadAssignments(id),
+                loadFrozenDates(id),
+                loadSundaySlots(id),
+            ]);
         } catch (err) {
             setError(err.message);
         }
@@ -737,8 +1039,6 @@ export default function MonthlyScheduling() {
 
     // ---------------- GOOGLE FORM ----------------
 
-    // Calls the backend to create the Google Form for a month, then stores
-    // the returned links on that month in local state.
     async function createGoogleFormFor(id) {
         const result = await request(`/google-forms/${id}/create`, {
             method: "POST",
@@ -766,7 +1066,6 @@ export default function MonthlyScheduling() {
         return result;
     }
 
-    // Fallback for months that do not have a Google Form yet
     async function retryCreateGoogleForm() {
         if (!selectedId) {
             setError("Please select a monthly form first.");
@@ -834,13 +1133,17 @@ export default function MonthlyScheduling() {
             setSelectedId(nextId);
             setAssignments([]);
             setFrozenDates([]);
+            setSundaySlots([]);
             setDateInput("");
+            setFreezeNoteInput("");
             setSelectedDay(null);
             cancelEditing();
+            cancelEditingFrozenNote();
+            cancelEditingSundayNote();
 
-            // Create the Google Form for this new month
             try {
                 await createGoogleFormFor(nextId);
+
                 setMessage(
                     `${title} created and its Google Form is ready. Use “Copy Form Link”.`
                 );
@@ -850,6 +1153,8 @@ export default function MonthlyScheduling() {
                     `Google Form could not be created: ${formErr.message} Use “Create Google Form” to retry.`
                 );
             }
+
+            await loadSundaySlots(nextId);
         } catch (err) {
             setError(err.message);
         } finally {
@@ -863,7 +1168,6 @@ export default function MonthlyScheduling() {
         (f) => String(f.id) === String(selectedId)
     );
 
-    // The link comes from the database (saved on the monthly form)
     const googleFormUrl = selectedForm?.google_form_url || "";
 
     async function copyGoogleFormLink() {
@@ -878,20 +1182,16 @@ export default function MonthlyScheduling() {
     }
 
     const isClosed = Boolean(selectedForm) && !selectedForm.is_open;
-
-    // Scheduling steps unlock only after the form is closed
     const showScheduling = Boolean(selectedForm) && isClosed;
-
-    // Generate / assign unlock only after "Done Freezing"
     const scheduleUnlocked = showScheduling && freezeDone;
 
-    function isDateFrozen(dateValue) {
-        const date = getDateOnly(dateValue);
-        return frozenDates.some((i) => getDateOnly(i.frozen_date) === date);
-    }
+    const filled = assignments.filter(
+        (item) => item.lector_id != null || Boolean(item.special_text)
+    ).length;
 
-    const filled = assignments.filter((i) => i.lector_id != null).length;
-    const unfilled = assignments.filter((i) => i.lector_id == null).length;
+    const unfilled = assignments.filter(
+        (item) => item.lector_id == null && !item.special_text
+    ).length;
 
     const progress =
         assignments.length > 0
@@ -903,12 +1203,18 @@ export default function MonthlyScheduling() {
             buildCalendarWeeks(
                 selectedForm?.month,
                 selectedForm?.year,
-                assignments
+                assignments,
+                sundaySlots
             ),
-        [selectedForm?.month, selectedForm?.year, assignments]
+        [
+            selectedForm?.month,
+            selectedForm?.year,
+            assignments,
+            sundaySlots,
+        ]
     );
 
-    const activeLectors = lectors.filter((l) => l.is_active);
+    const activeLectors = lectors.filter((lector) => lector.is_active);
 
     const selectedDayItems = useMemo(() => {
         if (!selectedDay) return [];
@@ -923,6 +1229,27 @@ export default function MonthlyScheduling() {
 
         return [];
     }, [selectedDay, calendarWeeks]);
+
+    const selectedDaySundaySlots = useMemo(() => {
+        if (!selectedDay) return [];
+
+        for (const week of calendarWeeks) {
+            for (const cell of week) {
+                if (cell && cell.dateStr === selectedDay) {
+                    return cell.sundaySlots || [];
+                }
+            }
+        }
+
+        return [];
+    }, [selectedDay, calendarWeeks]);
+
+    // A date can now have several frozen times
+    const selectedFrozenDates = useMemo(
+        () =>
+            selectedDay ? getFrozenForDate(frozenDates, selectedDay) : [],
+        [selectedDay, frozenDates]
+    );
 
     // ---------------- CLOSE / REOPEN ----------------
 
@@ -940,31 +1267,65 @@ export default function MonthlyScheduling() {
         setError("");
         setMessage("");
 
+        let result;
+
         try {
-            const result = await request(
+            result = await request(
                 `/monthly-forms/${selectedId}/${action}`,
                 { method: "PATCH" }
             );
-
-            await loadForms();
-
-            setMessage(
-                result.message ||
-                (action === "close"
-                    ? "Monthly form closed. You can now freeze dates."
-                    : "Monthly form reopened.")
-            );
         } catch (err) {
             setError(err.message);
-        } finally {
             setWorking(false);
+            return;
         }
-    }
 
+        // Make the Google Form match the database state.
+        let googleError = "";
+
+        try {
+            await request(`/google-forms/${selectedId}/sync-status`, {
+                method: "POST",
+            });
+        } catch (err) {
+            googleError = err.message;
+        }
+
+        try {
+            await loadForms();
+        } catch {
+            // loadForms reports its own errors.
+        }
+
+        setMessage(
+            result.message ||
+            (action === "close"
+                ? "Monthly form closed. You can now freeze dates."
+                : "Monthly form reopened.")
+        );
+
+        if (googleError) {
+            setError(
+                `The monthly form was updated, but the Google Form could not be ${
+                    action === "close" ? "closed" : "reopened"
+                }: ${googleError}`
+            );
+        }
+
+        setWorking(false);
+    }
     // ---------------- FROZEN DATES ----------------
 
     async function addFrozenDate() {
-        if (!dateInput || !selectedId || !selectedForm) return;
+        if (!selectedId || !selectedForm) {
+            setError("Select a monthly form first.");
+            return;
+        }
+
+        if (!dateInput) {
+            setError("Choose a date to freeze first.");
+            return;
+        }
 
         const date = new Date(`${dateInput}T12:00:00`);
 
@@ -976,8 +1337,14 @@ export default function MonthlyScheduling() {
             return;
         }
 
-        if (isDateFrozen(dateInput)) {
-            setError("That date has already been frozen.");
+        // Same date is allowed with a different time
+        if (isSlotFrozen(frozenDates, dateInput, freezeTimeInput)) {
+            setError("That date and time has already been frozen.");
+            return;
+        }
+
+        if (freezeNoteInput.length > 100) {
+            setError("Frozen date note cannot exceed 100 characters.");
             return;
         }
 
@@ -991,15 +1358,18 @@ export default function MonthlyScheduling() {
                 body: JSON.stringify({
                     monthly_form_id: Number(selectedId),
                     frozen_date: dateInput,
-                    reason: null,
+                    frozen_time: freezeTimeInput,
+                    reason: freezeNoteInput.trim() || null,
                 }),
             });
 
             await loadFrozenDates(selectedId);
 
             setDateInput("");
+            setFreezeNoteInput("");
             setMessage("Frozen date saved successfully.");
         } catch (err) {
+            console.error("Add frozen date failed:", err);
             setError(err.message);
         } finally {
             setWorking(false);
@@ -1014,9 +1384,17 @@ export default function MonthlyScheduling() {
         setMessage("");
 
         try {
-            await request(`/frozen-dates/${id}`, { method: "DELETE" });
+            const result = await request(`/frozen-dates/${id}`, {
+                method: "DELETE",
+            });
+
             await loadFrozenDates(selectedId);
-            setMessage("Frozen date removed successfully.");
+
+            if (editingFrozenId === id) {
+                cancelEditingFrozenNote();
+            }
+
+            setMessage(result.message || "Frozen date removed successfully.");
         } catch (err) {
             setError(err.message);
         } finally {
@@ -1071,13 +1449,12 @@ export default function MonthlyScheduling() {
         }
     }
 
-    // Uses the backend DELETE /assignments/delete-all/{monthly_form_id}
     async function deleteAllAssignments() {
         if (!scheduleUnlocked || assignments.length === 0) return;
 
         if (
             !window.confirm(
-                `Delete ALL ${assignments.length} assignment positions for this month, including frozen dates and manual assignments? You can generate positions again afterwards.`
+                `Delete ALL ${assignments.length} assignment positions for this month, including manual assignments, frozen dates and notes, and Sunday Mass notes? You can freeze and generate again afterwards.`
             )
         ) {
             return;
@@ -1095,7 +1472,16 @@ export default function MonthlyScheduling() {
 
             cancelEditing();
             setSelectedDay(null);
-            await loadAssignments(selectedId);
+
+            cancelEditingFrozenNote();
+            cancelEditingSundayNote();
+
+            // Reload everything so the calendar matches the backend.
+            await Promise.all([
+                loadAssignments(selectedId),
+                loadFrozenDates(selectedId),
+                loadSundaySlots(selectedId),
+            ]);
 
             setMessage(result.message || "All assignments deleted.");
         } catch (err) {
@@ -1114,15 +1500,22 @@ export default function MonthlyScheduling() {
         }
 
         setEditingAssignmentId(item.id);
+
         setManualLectorId(
             item.lector_id != null ? String(item.lector_id) : ""
         );
+
+        setSpecialText(item.special_text || "");
+        setAssignmentMode(item.special_text ? "text" : "lector");
         setOverrideAvailability(false);
         setError("");
         setMessage("");
     }
 
-    async function saveManualAssignment(assignmentId, allowOverride = false) {
+    async function saveManualAssignment(
+        assignmentId,
+        allowOverride = false
+    ) {
         if (!manualLectorId) {
             setError("Please select a lector.");
             return;
@@ -1151,7 +1544,6 @@ export default function MonthlyScheduling() {
             cancelEditing();
             await loadAssignments(selectedId);
         } catch (err) {
-            // Ask for confirmation only if soft availability warnings exist.
             let detail = err.detail;
 
             if (!detail && err.message) {
@@ -1169,7 +1561,7 @@ export default function MonthlyScheduling() {
             ) {
                 const confirmed = window.confirm(
                     "Availability warnings:\n\n" +
-                    detail.warnings.map((w) => `• ${w}`).join("\n") +
+                    detail.warnings.map((warning) => `• ${warning}`).join("\n") +
                     "\n\nDo you want to assign this lector anyway?"
                 );
 
@@ -1182,6 +1574,40 @@ export default function MonthlyScheduling() {
             } else {
                 setError(err.message || "Could not save assignment.");
             }
+        } finally {
+            setWorking(false);
+        }
+    }
+
+    async function saveSpecialText(assignmentId, textValue = specialText) {
+        if (textValue.length > 100) {
+            setError("Custom text cannot exceed 100 characters.");
+            return;
+        }
+
+        setWorking(true);
+        setError("");
+        setMessage("");
+
+        try {
+            const result = await request(
+                `/assignments/${assignmentId}/special-text`,
+                {
+                    method: "PATCH",
+                    body: JSON.stringify({
+                        special_text: textValue.trim() || null,
+                    }),
+                }
+            );
+
+            cancelEditing();
+            await loadAssignments(selectedId);
+
+            setMessage(
+                result.message || "Custom text saved successfully."
+            );
+        } catch (err) {
+            setError(err.message || "Could not save custom text.");
         } finally {
             setWorking(false);
         }
@@ -1228,8 +1654,12 @@ export default function MonthlyScheduling() {
             return;
         }
 
-        const html = buildRosterDocument(selectedForm, assignments);
-
+        const html = buildRosterDocument(
+            selectedForm,
+            assignments,
+            sundaySlots,
+            frozenDates
+        );
         const monthLabel =
             selectedForm.title ||
             `${selectedForm.month || "month"}-${selectedForm.year || ""}`;
@@ -1274,7 +1704,9 @@ export default function MonthlyScheduling() {
         };
     }
 
-    // ---------------- RENDER ----------------
+    // --------------------------------------------------
+    // RENDER
+    // --------------------------------------------------
 
     return (
         <div className="monthly-scheduling">
@@ -1316,9 +1748,7 @@ export default function MonthlyScheduling() {
                 </div>
 
                 {loading ? (
-                    <p className="loading-message">
-                        Loading monthly forms...
-                    </p>
+                    <p className="loading-message">Loading monthly forms...</p>
                 ) : forms.length === 0 ? (
                     <p className="empty-state">
                         No monthly forms found. Add a month below to get
@@ -1333,8 +1763,7 @@ export default function MonthlyScheduling() {
                         >
                             {forms.map((form) => (
                                 <option key={form.id} value={form.id}>
-                                    {form.title ||
-                                        `${form.month}/${form.year}`}
+                                    {form.title || `${form.month}/${form.year}`}
                                     {form.is_open ? " — Open" : " — Closed"}
                                 </option>
                             ))}
@@ -1342,9 +1771,7 @@ export default function MonthlyScheduling() {
 
                         <div className="schedule-actions">
                             <span
-                                className={`status-pill ${isClosed
-                                    ? "status-inactive"
-                                    : "status-active"
+                                className={`status-pill ${isClosed ? "status-inactive" : "status-active"
                                     }`}
                             >
                                 {isClosed ? (
@@ -1401,9 +1828,7 @@ export default function MonthlyScheduling() {
                                     }
                                 >
                                     <FileText size={17} />
-                                    {working
-                                        ? "Working..."
-                                        : "Create Google Form"}
+                                    {working ? "Working..." : "Create Google Form"}
                                 </button>
                             )}
                         </div>
@@ -1462,8 +1887,8 @@ export default function MonthlyScheduling() {
                         <div>
                             <h2>Step 1 · Frozen Dates</h2>
                             <p>
-                                Auto-assign skips these dates. You can still
-                                assign them manually.
+                                Auto-assign skips these dates and times. You
+                                can still assign them manually.
                             </p>
                         </div>
 
@@ -1480,8 +1905,32 @@ export default function MonthlyScheduling() {
                         <div className="date-add-row">
                             <input
                                 type="date"
+                                className="form-select"
                                 value={dateInput}
                                 onChange={(e) => setDateInput(e.target.value)}
+                                disabled={working}
+                            />
+
+                            <select
+                                className="form-select"
+                                value={freezeTimeInput}
+                                onChange={(e) => setFreezeTimeInput(e.target.value)}
+                                disabled={working}
+                            >
+                                {ROSTER_SLOTS.map((time) => (
+                                    <option key={time} value={time}>
+                                        {time}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <input
+                                type="text"
+                                className="form-select"
+                                placeholder="Enter note"
+                                value={freezeNoteInput}
+                                onChange={(e) => setFreezeNoteInput(e.target.value)}
+                                maxLength={100}
                                 disabled={working}
                             />
 
@@ -1489,11 +1938,17 @@ export default function MonthlyScheduling() {
                                 type="button"
                                 className="secondary-button"
                                 onClick={addFrozenDate}
-                                disabled={!dateInput || working}
+                                disabled={working}
                             >
                                 <Plus size={16} />
                                 Add Frozen Date
                             </button>
+                        </div>
+                    )}
+
+                    {!freezeDone && error && (
+                        <div className="notice-error" style={{ marginTop: 14 }}>
+                            {String(error)}
                         </div>
                     )}
 
@@ -1511,16 +1966,14 @@ export default function MonthlyScheduling() {
                                         : "Remove frozen date"
                                 }
                             >
-                                {getDateOnly(item.frozen_date)}
+                                {getDateOnly(item.frozen_date)} · {getFrozenTime(item)}
                                 {!freezeDone && <X size={14} />}
                             </button>
                         ))}
                     </div>
 
                     {frozenDates.length === 0 && (
-                        <p className="empty-state">
-                            No frozen dates selected.
-                        </p>
+                        <p className="empty-state">No frozen dates selected.</p>
                     )}
 
                     <div className="schedule-actions">
@@ -1550,7 +2003,7 @@ export default function MonthlyScheduling() {
                     <p className="field-hint">
                         {freezeDone
                             ? "Frozen dates are locked in. Continue to Step 2."
-                            : "Frozen dates are skipped by auto-assign but can be assigned manually. Click “Done Freezing” when finished."}
+                            : "Only the chosen time is frozen; other Masses that day can still be auto-assigned. Click “Done Freezing” when finished."}
                     </p>
                 </section>
             )}
@@ -1566,8 +2019,7 @@ export default function MonthlyScheduling() {
                             <h2>Step 2 · Generate &amp; Assign</h2>
                             <p>
                                 Create positions, auto-assign eligible
-                                lectors, or delete everything and start
-                                again.
+                                lectors, or delete everything and start again.
                             </p>
                         </div>
                         <WandSparkles size={25} className="soft-icon" />
@@ -1657,6 +2109,7 @@ export default function MonthlyScheduling() {
                         </div>
                     </section>
 
+                    {/* MONTHLY CALENDAR */}
                     <section className="content-card">
                         <div className="section-heading">
                             <div>
@@ -1667,24 +2120,28 @@ export default function MonthlyScheduling() {
                                         : ""}
                                 </h2>
                                 <p>
-                                    Click any date to view and edit its
-                                    assignments.
+                                    Click a date to view its assignments.
+                                    Click Sunday 7:30 AM or 9:45 AM to edit
+                                    that Mass note directly.
                                 </p>
                             </div>
                             <CalendarDays size={25} className="soft-icon" />
                         </div>
 
-                        {assignments.length === 0 ? (
+                        {assignments.length === 0 &&
+                            sundaySlots.length === 0 &&
+                            frozenDates.length === 0 ? (
                             <p className="empty-state">
-                                No assignment positions yet. Generate
-                                positions in Step 2.
+                                No assignment positions or Sunday Mass slots
+                                were returned. Generate positions and check
+                                that the Sunday slots API is enabled.
                             </p>
                         ) : (
                             <div className="cal-grid-wrap">
                                 <div className="cal-grid">
-                                    {WEEKDAYS.map((d) => (
-                                        <div className="cal-head" key={d}>
-                                            {d}
+                                    {WEEKDAYS.map((day) => (
+                                        <div className="cal-head" key={day}>
+                                            {day}
                                         </div>
                                     ))}
 
@@ -1698,47 +2155,73 @@ export default function MonthlyScheduling() {
                                             );
                                         }
 
-                                        const frozen = isDateFrozen(
+                                        // Frozen entries for this date (one per frozen time)
+                                        const frozenForDay = getFrozenForDate(
+                                            frozenDates,
                                             cell.dateStr
                                         );
-                                        const total = cell.items.length;
-                                        const done = cell.items.filter(
-                                            (i) => i.lector_id != null
+
+                                        const frozenTimes = new Set(
+                                            frozenForDay.map(getFrozenTime)
+                                        );
+
+                                        // Only positions NOT in a frozen time are shown
+                                        // and counted as normal.
+                                        const openItems = cell.items.filter(
+                                            (item) =>
+                                                !frozenTimes.has(
+                                                    formatMassTime(
+                                                        getMassTime(item)
+                                                    )
+                                                )
+                                        );
+
+                                        const fullyFrozen =
+                                            frozenForDay.length > 0 &&
+                                            openItems.length === 0;
+
+                                        const total = openItems.length;
+
+                                        const done = openItems.filter(
+                                            (item) =>
+                                                item.lector_id != null ||
+                                                Boolean(item.special_text)
                                         ).length;
 
-                                        // Group by Mass time
                                         const byTime = [];
 
-                                        cell.items.forEach((item) => {
-                                            const t = formatMassTime(
+                                        openItems.forEach((item) => {
+                                            const time = formatMassTime(
                                                 getMassTime(item)
                                             );
-                                            let g = byTime.find(
-                                                (x) => x.time === t
+
+                                            let group = byTime.find(
+                                                (entry) => entry.time === time
                                             );
 
-                                            if (!g) {
-                                                g = { time: t, items: [] };
-                                                byTime.push(g);
+                                            if (!group) {
+                                                group = { time, items: [] };
+                                                byTime.push(group);
                                             }
 
-                                            g.items.push(item);
+                                            group.items.push(item);
                                         });
 
+                                        const sundaySlotsForDay =
+                                            cell.sundaySlots || [];
+
                                         return (
-                                            <button
-                                                type="button"
+                                            <div
                                                 key={cell.dateStr}
                                                 className={`cal-cell ${selectedDay === cell.dateStr
                                                     ? "cal-selected"
                                                     : ""
-                                                    } ${frozen ? "cal-frozen" : ""
-                                                    }`}
+                                                    } ${fullyFrozen ? "cal-frozen" : ""}`}
                                                 onClick={() => {
-                                                    setSelectedDay(
-                                                        cell.dateStr
-                                                    );
+                                                    setSelectedDay(cell.dateStr);
                                                     cancelEditing();
+                                                    cancelEditingFrozenNote();
+                                                    cancelEditingSundayNote();
                                                 }}
                                             >
                                                 <div className="cal-date-row">
@@ -1747,11 +2230,6 @@ export default function MonthlyScheduling() {
                                                     </span>
 
                                                     <span className="cal-badges">
-                                                        {frozen && (
-                                                            <span className="cal-badge">
-                                                                Frozen
-                                                            </span>
-                                                        )}
                                                         {total > 0 && (
                                                             <span
                                                                 className={`cal-badge ${done === total
@@ -1766,46 +2244,96 @@ export default function MonthlyScheduling() {
                                                 </div>
 
                                                 <div className="cal-lines">
-                                                    {byTime.map((g) => (
+                                                    {/* One line per frozen time */}
+                                                    {frozenForDay.map((f) => (
                                                         <div
                                                             className="cal-time-group"
-                                                            key={g.time}
+                                                            key={`frozen-${f.id}`}
+                                                        >
+                                                            <span className="cal-line cal-line-frozen">
+                                                                {getFrozenTime(f)} —{" "}
+                                                                {f.reason || "Frozen"}
+                                                            </span>
+                                                        </div>
+                                                    ))}
+
+                                                    {/* Sunday special Mass note buttons */}
+                                                    {sundaySlotsForDay.length > 0 &&
+                                                        SUNDAY_SPECIAL_TIMES.map(
+                                                            (time) => {
+                                                                const slot =
+                                                                    sundaySlotsForDay.find(
+                                                                        (item) =>
+                                                                            isSundaySlot(
+                                                                                item,
+                                                                                time
+                                                                            )
+                                                                    );
+
+                                                                if (!slot) return null;
+
+                                                                return (
+                                                                    <button
+                                                                        type="button"
+                                                                        key={`${cell.dateStr}-${time}`}
+                                                                        className="cal-line sunday-slot-note-button"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            setSelectedDay(
+                                                                                cell.dateStr
+                                                                            );
+                                                                            cancelEditing();
+                                                                            cancelEditingFrozenNote();
+                                                                            startEditingSundayNote(
+                                                                                slot
+                                                                            );
+                                                                        }}
+                                                                        title={`Add or edit ${time} note`}
+                                                                    >
+                                                                        <b>{time}</b>
+                                                                        <span>
+                                                                            {slot.note
+                                                                                ? slot.note
+                                                                                : "＋ Add note"}
+                                                                        </span>
+                                                                    </button>
+                                                                );
+                                                            }
+                                                        )}
+
+                                                    {/* Open (non-frozen) times, e.g. 6:00 PM */}
+                                                    {byTime.map((group) => (
+                                                        <div
+                                                            className="cal-time-group"
+                                                            key={group.time}
                                                         >
                                                             <span className="cal-time">
-                                                                {g.time}
+                                                                {group.time}
                                                             </span>
 
-                                                            {g.items.map(
-                                                                (item) => (
-                                                                    <span
-                                                                        key={
-                                                                            item.id
-                                                                        }
-                                                                        className={`cal-line ${item.lector_id ==
-                                                                            null
+                                                            {group.items.map((item) => (
+                                                                <span
+                                                                    key={item.id}
+                                                                    className={`cal-line ${item.special_text
+                                                                        ? "cal-line-special"
+                                                                        : item.lector_id == null
                                                                             ? "cal-line-empty"
                                                                             : ""
-                                                                            }`}
-                                                                    >
-                                                                        <b>
-                                                                            {getReadingLabel(
-                                                                                item
-                                                                            ) ||
-                                                                                "—"}
-                                                                        </b>{" "}
-                                                                        {item.lector_id !=
-                                                                            null
-                                                                            ? getAssignmentName(
-                                                                                item
-                                                                            )
-                                                                            : "—"}
-                                                                    </span>
-                                                                )
-                                                            )}
+                                                                        }`}
+                                                                >
+                                                                    <b>
+                                                                        {getReadingLabel(item) || "—"}
+                                                                    </b>{" "}
+                                                                    {item.lector_id != null ||
+                                                                        item.special_text
+                                                                        ? getAssignmentName(item)
+                                                                        : "—"}
+                                                                </span>
+                                                            ))}
                                                         </div>
                                                     ))}
                                                 </div>
-                                            </button>
+                                            </div>
                                         );
                                     })}
                                 </div>
@@ -1828,10 +2356,11 @@ export default function MonthlyScheduling() {
                                             year: "numeric",
                                         })}
                                     </h2>
+
                                     <p>
-                                        {isDateFrozen(selectedDay)
-                                            ? "Frozen date: auto-assign skips it. Assign lectors manually."
-                                            : "Edit or remove positions for this date."}
+                                        View the Sunday Mass notes, Frozen Date
+                                        Notes, and normal assignment positions
+                                        separately.
                                     </p>
                                 </div>
 
@@ -1841,6 +2370,8 @@ export default function MonthlyScheduling() {
                                     onClick={() => {
                                         setSelectedDay(null);
                                         cancelEditing();
+                                        cancelEditingFrozenNote();
+                                        cancelEditingSundayNote();
                                     }}
                                 >
                                     <X size={15} />
@@ -1848,16 +2379,282 @@ export default function MonthlyScheduling() {
                                 </button>
                             </div>
 
+                            {/* SUNDAY 7:30 AM AND 9:45 AM NOTE EDITORS */}
+                            {selectedDaySundaySlots.length > 0 && (
+                                <div className="calendar-mass-list">
+                                    {SUNDAY_SPECIAL_TIMES.map((time) => {
+                                        const slot =
+                                            selectedDaySundaySlots.find(
+                                                (item) =>
+                                                    isSundaySlot(item, time)
+                                            );
+
+                                        if (!slot) return null;
+
+                                        const isEditingThisSlot =
+                                            editingSundayNote &&
+                                            selectedSundaySlot &&
+                                            selectedSundaySlot.mass_slot_id ===
+                                            slot.mass_slot_id &&
+                                            getSundaySlotDate(
+                                                selectedSundaySlot
+                                            ) === getSundaySlotDate(slot);
+
+                                        return (
+                                            <div
+                                                className="calendar-assignment"
+                                                key={`${selectedDay}-${time}`}
+                                            >
+                                                <div className="calendar-assignment-main">
+                                                    <div className="calendar-assignment-time">
+                                                        <strong>{time}</strong>
+                                                        <span>Sunday Special Mass</span>
+                                                    </div>
+
+                                                    <div className="calendar-assignment-info">
+                                                        <strong>Mass Note</strong>
+                                                        <span>
+                                                            {slot.note ||
+                                                                "No note added."}
+                                                        </span>
+                                                    </div>
+
+                                                    <span className="status-pill status-active">
+                                                        No Positions
+                                                    </span>
+                                                </div>
+
+                                                {!isEditingThisSlot && (
+                                                    <div className="calendar-assignment-actions">
+                                                        <button
+                                                            type="button"
+                                                            className="secondary-button"
+                                                            onClick={() =>
+                                                                startEditingSundayNote(
+                                                                    slot
+                                                                )
+                                                            }
+                                                            disabled={working}
+                                                        >
+                                                            <Pencil size={15} />
+                                                            {slot.note
+                                                                ? "Edit Note"
+                                                                : "Add Note"}
+                                                        </button>
+                                                    </div>
+                                                )}
+
+                                                {isEditingThisSlot && (
+                                                    <div className="manual-editor">
+                                                        <h4>
+                                                            {time} Mass Note
+                                                        </h4>
+
+                                                        <label
+                                                            htmlFor={`sunday-note-${time.replace(
+                                                                /[^0-9]/g,
+                                                                ""
+                                                            )}`}
+                                                        >
+                                                            Enter note
+                                                        </label>
+
+                                                        <textarea
+                                                            id={`sunday-note-${time.replace(
+                                                                /[^0-9]/g,
+                                                                ""
+                                                            )}`}
+                                                            className="form-select"
+                                                            rows={3}
+                                                            maxLength={1000}
+                                                            value={sundayNoteDraft}
+                                                            onChange={(e) =>
+                                                                setSundayNoteDraft(
+                                                                    e.target.value
+                                                                )
+                                                            }
+                                                            placeholder={`Enter a note for the Sunday ${time} Mass`}
+                                                            disabled={working}
+                                                        />
+
+                                                        <p className="field-hint">
+                                                            This note is saved
+                                                            separately for this
+                                                            Sunday date and Mass
+                                                            time. It does not
+                                                            create assignment
+                                                            positions.
+                                                        </p>
+
+                                                        <div className="schedule-actions">
+                                                            <button
+                                                                type="button"
+                                                                className="primary-button"
+                                                                onClick={saveSundayNote}
+                                                                disabled={working}
+                                                            >
+                                                                {working
+                                                                    ? "Saving..."
+                                                                    : "Save Note"}
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                className="secondary-button"
+                                                                onClick={cancelEditingSundayNote}
+                                                                disabled={working}
+                                                            >
+                                                                Cancel
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+
+                            {/* FROZEN DATE NOTE EDITORS - ONE PER FROZEN TIME */}
+                            {selectedFrozenDates.map((fd) => (
+                                <div className="empty-state" key={fd.id}>
+                                    {editingFrozenId === fd.id ? (
+                                        <div style={{ width: "100%" }}>
+                                            <label htmlFor={`frozen-time-${fd.id}`}>
+                                                Time
+                                            </label>
+
+                                            <select
+                                                id={`frozen-time-${fd.id}`}
+                                                className="form-select"
+                                                value={frozenTimeDraft}
+                                                onChange={(e) =>
+                                                    setFrozenTimeDraft(
+                                                        e.target.value
+                                                    )
+                                                }
+                                                disabled={working}
+                                            >
+                                                {ROSTER_SLOTS.map((time) => (
+                                                    <option
+                                                        key={time}
+                                                        value={time}
+                                                    >
+                                                        {time}
+                                                    </option>
+                                                ))}
+                                            </select>
+
+                                            <label htmlFor={`frozen-note-${fd.id}`}>
+                                                Frozen Date Note
+                                            </label>
+
+                                            <input
+                                                id={`frozen-note-${fd.id}`}
+                                                type="text"
+                                                autoFocus
+                                                className="form-select"
+                                                maxLength={100}
+                                                placeholder="Enter a note, e.g. St. Anne's Community"
+                                                value={frozenNoteDraft}
+                                                onChange={(e) =>
+                                                    setFrozenNoteDraft(
+                                                        e.target.value
+                                                    )
+                                                }
+                                                disabled={working}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter") {
+                                                        e.preventDefault();
+                                                        saveFrozenNote();
+                                                    }
+
+                                                    if (e.key === "Escape") {
+                                                        cancelEditingFrozenNote();
+                                                    }
+                                                }}
+                                            />
+
+                                            <p className="field-hint">
+                                                Maximum 100 characters. The
+                                                note appears in the selected
+                                                time column of the downloaded
+                                                roster.
+                                            </p>
+
+                                            <div className="schedule-actions">
+                                                <button
+                                                    type="button"
+                                                    className="primary-button"
+                                                    onClick={saveFrozenNote}
+                                                    disabled={working}
+                                                >
+                                                    {working
+                                                        ? "Saving..."
+                                                        : "Save Note"}
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    className="secondary-button"
+                                                    onClick={cancelEditingFrozenNote}
+                                                    disabled={working}
+                                                >
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div style={{ width: "100%" }}>
+                                            <p>
+                                                <strong>
+                                                    Frozen Date Note (
+                                                    {getFrozenTime(fd)}
+                                                    ):
+                                                </strong>{" "}
+                                                {fd.reason || "No note added."}
+                                            </p>
+
+                                            <div className="schedule-actions">
+                                                <button
+                                                    type="button"
+                                                    className="secondary-button"
+                                                    onClick={() =>
+                                                        startEditingFrozenNote(fd)
+                                                    }
+                                                    disabled={working}
+                                                >
+                                                    <Pencil size={15} />
+                                                    Edit Frozen Date Note
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+
+                            {/* NORMAL ASSIGNMENT POSITIONS */}
                             {selectedDayItems.length === 0 ? (
                                 <p className="empty-state">
-                                    No positions on this date.
+                                    No normal assignment positions on this date.
                                 </p>
                             ) : (
                                 <div className="calendar-mass-list">
                                     {selectedDayItems.map((item) => {
                                         const isEditing =
                                             editingAssignmentId === item.id;
+
                                         const blocked = !scheduleUnlocked;
+
+                                        const itemTime = formatMassTime(
+                                            getMassTime(item)
+                                        );
+
+                                        const itemFrozen = isSlotFrozen(
+                                            frozenDates,
+                                            selectedDay,
+                                            itemTime
+                                        );
 
                                         return (
                                             <div
@@ -1867,64 +2664,61 @@ export default function MonthlyScheduling() {
                                                 <div className="calendar-assignment-main">
                                                     <div className="calendar-assignment-time">
                                                         <strong>
-                                                            {formatMassTime(
-                                                                getMassTime(
-                                                                    item
-                                                                )
-                                                            )}
+                                                            {itemTime}
                                                         </strong>
+
                                                         <span>
                                                             {item.mass_type ||
-                                                                item.mass_slot
-                                                                    ?.mass_type ||
+                                                                item.mass_slot?.mass_type ||
                                                                 "Mass"}
                                                         </span>
                                                     </div>
 
                                                     <div className="calendar-assignment-info">
                                                         <strong>
-                                                            {
-                                                                item.responsibility
-                                                            }
+                                                            {item.responsibility}
                                                         </strong>
+
                                                         <span>
                                                             Position{" "}
-                                                            {
-                                                                item.position_number
-                                                            }
+                                                            {item.position_number}
                                                         </span>
+
                                                         <span
                                                             className={
-                                                                item.lector_id !=
-                                                                    null
+                                                                item.lector_id != null ||
+                                                                    item.special_text
                                                                     ? "assignment-lector"
                                                                     : "assignment-unfilled"
                                                             }
                                                         >
-                                                            <UsersRound
-                                                                size={15}
-                                                            />
-                                                            {getAssignmentName(
-                                                                item
-                                                            )}
+                                                            <UsersRound size={15} />
+                                                            {getAssignmentName(item)}
                                                         </span>
                                                     </div>
 
                                                     <span
-                                                        className={`status-pill ${item.lector_id !=
-                                                            null
+                                                        className={`status-pill ${item.lector_id != null ||
+                                                            item.special_text
                                                             ? "status-active"
                                                             : "status-pending"
                                                             }`}
                                                     >
-                                                        {item.lector_id !=
-                                                            null
-                                                            ? "Assigned"
-                                                            : "Unassigned"}
+                                                        {item.special_text
+                                                            ? "Custom Text"
+                                                            : item.lector_id != null
+                                                                ? "Assigned"
+                                                                : "Unassigned"}
                                                     </span>
                                                 </div>
 
                                                 <div className="calendar-assignment-actions">
+                                                    {itemFrozen && (
+                                                        <span className="field-hint">
+                                                            Frozen time
+                                                        </span>
+                                                    )}
+
                                                     {item.is_manual && (
                                                         <span className="field-hint">
                                                             Manual
@@ -1940,10 +2734,7 @@ export default function MonthlyScheduling() {
                                                     <button
                                                         type="button"
                                                         className="secondary-button"
-                                                        disabled={
-                                                            working ||
-                                                            blocked
-                                                        }
+                                                        disabled={working || blocked}
                                                         onClick={() =>
                                                             startEditing(item)
                                                         }
@@ -1955,10 +2746,7 @@ export default function MonthlyScheduling() {
                                                     <button
                                                         type="button"
                                                         className="secondary-button"
-                                                        disabled={
-                                                            working ||
-                                                            blocked
-                                                        }
+                                                        disabled={working || blocked}
                                                         onClick={() =>
                                                             clearManualAssignment(
                                                                 item.id
@@ -1973,87 +2761,183 @@ export default function MonthlyScheduling() {
                                                 {isEditing && (
                                                     <div className="manual-editor">
                                                         <h4>
-                                                            Manually assign
-                                                            lector
+                                                            Edit Assignment Position
                                                         </h4>
-
-                                                        <label>
-                                                            Select an active
-                                                            lector
-                                                        </label>
-
-                                                        <select
-                                                            className="form-select"
-                                                            value={
-                                                                manualLectorId
-                                                            }
-                                                            onChange={(e) =>
-                                                                setManualLectorId(
-                                                                    e.target
-                                                                        .value
-                                                                )
-                                                            }
-                                                        >
-                                                            <option value="">
-                                                                Choose a
-                                                                lector
-                                                            </option>
-
-                                                            {activeLectors.map(
-                                                                (lector) => (
-                                                                    <option
-                                                                        key={
-                                                                            lector.id
-                                                                        }
-                                                                        value={
-                                                                            lector.id
-                                                                        }
-                                                                    >
-                                                                        {getLectorName(
-                                                                            lector,
-                                                                            lector.id
-                                                                        )}
-                                                                    </option>
-                                                                )
-                                                            )}
-                                                        </select>
-
-                                                        <p className="field-hint">
-                                                            Hard scheduling
-                                                            conflicts, such as
-                                                            consecutive serving
-                                                            days, are still
-                                                            checked by the
-                                                            backend.
-                                                        </p>
 
                                                         <div className="schedule-actions">
                                                             <button
                                                                 type="button"
-                                                                className="primary-button"
-                                                                disabled={
-                                                                    working ||
-                                                                    !manualLectorId
+                                                                className={
+                                                                    assignmentMode ===
+                                                                        "lector"
+                                                                        ? "primary-button"
+                                                                        : "secondary-button"
                                                                 }
                                                                 onClick={() =>
-                                                                    saveManualAssignment(
-                                                                        item.id
+                                                                    setAssignmentMode(
+                                                                        "lector"
                                                                     )
                                                                 }
+                                                                disabled={working}
                                                             >
-                                                                Save
-                                                                Assignment
+                                                                <UsersRound size={16} />
+                                                                Assign Lector
                                                             </button>
 
                                                             <button
                                                                 type="button"
+                                                                className={
+                                                                    assignmentMode ===
+                                                                        "text"
+                                                                        ? "primary-button"
+                                                                        : "secondary-button"
+                                                                }
+                                                                onClick={() =>
+                                                                    setAssignmentMode(
+                                                                        "text"
+                                                                    )
+                                                                }
+                                                                disabled={working}
+                                                            >
+                                                                <Pencil size={16} />
+                                                                Custom Text
+                                                            </button>
+                                                        </div>
+
+                                                        {assignmentMode === "lector" ? (
+                                                            <>
+                                                                <label>
+                                                                    Select an active lector
+                                                                </label>
+
+                                                                <select
+                                                                    className="form-select"
+                                                                    value={manualLectorId}
+                                                                    onChange={(e) =>
+                                                                        setManualLectorId(
+                                                                            e.target.value
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <option value="">
+                                                                        Choose a lector
+                                                                    </option>
+
+                                                                    {activeLectors.map(
+                                                                        (lector) => (
+                                                                            <option
+                                                                                key={lector.id}
+                                                                                value={lector.id}
+                                                                            >
+                                                                                {getLectorName(
+                                                                                    lector,
+                                                                                    lector.id
+                                                                                )}
+                                                                            </option>
+                                                                        )
+                                                                    )}
+                                                                </select>
+
+                                                                <p className="field-hint">
+                                                                    Hard scheduling
+                                                                    conflicts, such
+                                                                    as consecutive
+                                                                    serving days,
+                                                                    are still checked
+                                                                    by the backend.
+                                                                </p>
+
+                                                                <div className="schedule-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="primary-button"
+                                                                        disabled={
+                                                                            working ||
+                                                                            !manualLectorId
+                                                                        }
+                                                                        onClick={() =>
+                                                                            saveManualAssignment(
+                                                                                item.id
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        Save Assignment
+                                                                    </button>
+                                                                </div>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <label>
+                                                                    Enter Custom Text
+                                                                </label>
+
+                                                                <input
+                                                                    type="text"
+                                                                    className="form-select"
+                                                                    value={specialText}
+                                                                    onChange={(e) =>
+                                                                        setSpecialText(
+                                                                            e.target.value
+                                                                        )
+                                                                    }
+                                                                    maxLength={100}
+                                                                    placeholder="e.g. Zone 1, Sunday School, Youth Group"
+                                                                    disabled={working}
+                                                                />
+
+                                                                <p className="field-hint">
+                                                                    Custom text
+                                                                    replaces the
+                                                                    lector name in
+                                                                    this existing
+                                                                    position.
+                                                                    Maximum 100
+                                                                    characters.
+                                                                </p>
+
+                                                                <div className="schedule-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="primary-button"
+                                                                        disabled={
+                                                                            working ||
+                                                                            !specialText.trim()
+                                                                        }
+                                                                        onClick={() =>
+                                                                            saveSpecialText(
+                                                                                item.id
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        Save Custom Text
+                                                                    </button>
+
+                                                                    <button
+                                                                        type="button"
+                                                                        className="secondary-button"
+                                                                        disabled={
+                                                                            working ||
+                                                                            !item.special_text
+                                                                        }
+                                                                        onClick={() =>
+                                                                            saveSpecialText(
+                                                                                item.id,
+                                                                                ""
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        Clear Custom Text
+                                                                    </button>
+                                                                </div>
+                                                            </>
+                                                        )}
+
+                                                        <div className="schedule-actions">
+                                                            <button
+                                                                type="button"
                                                                 className="secondary-button"
-                                                                disabled={
-                                                                    working
-                                                                }
-                                                                onClick={
-                                                                    cancelEditing
-                                                                }
+                                                                disabled={working}
+                                                                onClick={cancelEditing}
                                                             >
                                                                 Cancel
                                                             </button>

@@ -34,6 +34,7 @@ class Assignment(Base):
         ForeignKey("lectors.id"),
         nullable=True
     )
+    special_text = Column(String(100), nullable=True)
 
     is_manual = Column(Boolean, default=False, nullable=False)
 

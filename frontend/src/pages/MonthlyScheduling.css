@@ -1,4 +1,3 @@
-
 /* =========================================================
    MONTHLY SCHEDULING
    Scoped styles — does not affect other admin pages
@@ -338,17 +337,20 @@
 
 /* =========================================================
    FROZEN DATES
+   Row: date | time | note | button
 ========================================================= */
 
 .monthly-scheduling .date-add-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 190px 150px minmax(200px, 1fr) auto;
     align-items: center;
     gap: 10px;
-    max-width: 560px;
 }
 
-.monthly-scheduling .date-add-row input {
-    flex: 1;
+.monthly-scheduling .date-add-row input,
+.monthly-scheduling .date-add-row select {
+    width: 100%;
+    min-width: 0;
 }
 
 .monthly-scheduling .date-chips {
@@ -502,7 +504,12 @@
         box-shadow 0.18s ease;
 }
 
-.monthly-scheduling button.cal-cell:hover {
+/* Calendar cells are clickable divs (they contain note buttons) */
+.monthly-scheduling .cal-cell:not(.cal-empty) {
+    cursor: pointer;
+}
+
+.monthly-scheduling .cal-cell:not(.cal-empty):not(.cal-selected):hover {
     background: #fcf7f8;
     border-color: #d9c2ca;
 }
@@ -739,6 +746,52 @@
 }
 
 /* =========================================================
+   SPECIAL TEXT / SUNDAY NOTES
+========================================================= */
+
+.cal-line-special {
+    font-weight: 700;
+    text-align: center;
+    color: #263b59;
+}
+
+.sunday-frozen-label {
+    display: inline-block;
+    margin-left: 5px;
+    padding: 2px 5px;
+    border-radius: 4px;
+    background: #e8edf5;
+    color: #40536d;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.sunday-slot-note-button {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    border: 1px solid #d8e2f0;
+    border-radius: 6px;
+    padding: 4px 6px;
+    margin: 3px 0;
+    background: #f1f6ff;
+    color: #23436b;
+    font: inherit;
+}
+
+.sunday-slot-note-button:hover {
+    background: #e5efff;
+    border-color: #91add3;
+}
+
+.sunday-slot-note-button span {
+    overflow-wrap: anywhere;
+    font-size: 0.85em;
+}
+
+/* =========================================================
    RESPONSIVE — TABLET
 ========================================================= */
 
@@ -754,6 +807,16 @@
 
     .monthly-scheduling .cal-cell {
         min-height: 115px;
+    }
+
+    /* Frozen-date row: date + time on top, note and button below */
+    .monthly-scheduling .date-add-row {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .monthly-scheduling .date-add-row input[type="text"],
+    .monthly-scheduling .date-add-row button {
+        grid-column: 1 / -1;
     }
 }
 
@@ -810,8 +873,7 @@
     }
 
     .monthly-scheduling .date-add-row {
-        flex-direction: column;
-        align-items: stretch;
+        grid-template-columns: 1fr;
     }
 
     .monthly-scheduling .date-add-row button {

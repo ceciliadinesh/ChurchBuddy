@@ -1,6 +1,8 @@
+
 from app.models.lector import Lector
 from app.models.monthly_form import MonthlyForm
 from app.models.availability import AvailabilitySubmission
+from app.models.sunday_slot_note import SundaySlotNote
 
 from app.models.availability_details import (
     LectorAvailableDay,
@@ -23,4 +25,5 @@ __all__ = [
     "FrozenDate",
     "MassSlot",
     "Assignment",
+    "SundaySlotNote",
 ]

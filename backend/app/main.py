@@ -1,6 +1,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.routers import sunday_slots
 
 from app.routers import (
     lectors,
@@ -45,3 +46,4 @@ app.include_router(mass_slots.router)
 app.include_router(assignments.router)
 app.include_router(auth.router)
 app.include_router(google_forms.router)
+app.include_router(sunday_slots.router)
