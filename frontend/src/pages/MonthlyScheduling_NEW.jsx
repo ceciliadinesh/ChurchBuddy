@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
     CalendarDays,
     WandSparkles,
@@ -146,13 +147,17 @@ function formatRosterDate(dateValue) {
     }
 
     return {
-        date: date.toLocaleDateString("en-GB", {
-            day: "2-digit",
-            month: "short",
-        }).toUpperCase(),
-        day: date.toLocaleDateString("en-US", {
-            weekday: "short",
-        }).toUpperCase(),
+        date: date
+            .toLocaleDateString("en-GB", {
+                day: "2-digit",
+                month: "short",
+            })
+            .toUpperCase(),
+        day: date
+            .toLocaleDateString("en-US", {
+                weekday: "short",
+            })
+            .toUpperCase(),
     };
 }
 
@@ -193,11 +198,7 @@ function isSlotFrozen(frozenDates, dateStr, timeLabel) {
 // Sunday note helpers
 
 function getSundaySlotDate(slot) {
-    return getDateOnly(
-        slot.slot_date ||
-        slot.date ||
-        slot.assignment_date
-    );
+    return getDateOnly(slot.slot_date || slot.date || slot.assignment_date);
 }
 
 function getSundaySlotTime(slot) {
@@ -212,8 +213,7 @@ function getSundaySlotTime(slot) {
 
 function isSundaySlot(slot, time) {
     return (
-        getSundaySlotTime(slot) === time &&
-        Boolean(getSundaySlotDate(slot))
+        getSundaySlotTime(slot) === time && Boolean(getSundaySlotDate(slot))
     );
 }
 
@@ -312,10 +312,8 @@ function buildRosterGroups(assignments, sundaySlots = [], frozenDates = []) {
                         .filter(
                             (item) =>
                                 getReadingLabel(item) === label &&
-                                (
-                                    item.lector_id != null ||
-                                    Boolean(item.special_text)
-                                )
+                                (item.lector_id != null ||
+                                    Boolean(item.special_text))
                         )
                         .map((item) => ({
                             text: getAssignmentName(item),
@@ -338,9 +336,7 @@ function buildRosterGroups(assignments, sundaySlots = [], frozenDates = []) {
 
                 if (columnIndex === -1) return;
 
-                let readingRow = rows.find(
-                    (row) => row.reading === "Rdng.1"
-                );
+                let readingRow = rows.find((row) => row.reading === "Rdng.1");
 
                 if (!readingRow) {
                     readingRow = {
@@ -372,8 +368,7 @@ function buildRosterGroups(assignments, sundaySlots = [], frozenDates = []) {
                 if (columnIndex === -1) return;
 
                 let readingRow =
-                    rows.find((row) => row.reading === "Rdng.1") ||
-                    rows[0];
+                    rows.find((row) => row.reading === "Rdng.1") || rows[0];
 
                 if (!readingRow) {
                     readingRow = {
@@ -416,11 +411,7 @@ function buildRosterDocument(
     sundaySlots = [],
     frozenDates = []
 ) {
-    const groups = buildRosterGroups(
-        assignments,
-        sundaySlots,
-        frozenDates
-    );
+    const groups = buildRosterGroups(assignments, sundaySlots, frozenDates);
 
     const monthYear =
         form?.title ||
@@ -438,8 +429,9 @@ function buildRosterDocument(
         .map((group) =>
             group.rows
                 .map((row, index) => {
-                    const dateCells = index === 0
-                        ? `
+                    const dateCells =
+                        index === 0
+                            ? `
                                 <td class="date" rowspan="${group.rows.length}">
                                     ${escapeHtml(group.date)}
                                 </td>
@@ -447,7 +439,33 @@ function buildRosterDocument(
                                     ${escapeHtml(group.day)}
                                 </td>
                             `
-                        : "";
+                            : "";
+
+                    const slotCells = row.slots
+                        .map((slotItems) => {
+                            const content = slotItems
+                                .map(
+                                    (item) => `
+                                            <div class="${item.special
+                                            ? "special-text"
+                                            : "person-text"
+                                        }">
+                                                ${escapeHtml(item.text)}
+                                            </div>
+                                        `
+                                )
+                                .join("");
+
+                            return `
+                                        <td class="${slotItems.some((item) => item.special)
+                                    ? "special"
+                                    : "person"
+                                }">
+                                            ${content}
+                                        </td>
+                                    `;
+                        })
+                        .join("");
 
                     return `
                             <tr class="${index === 0 ? "date-start" : ""}">
@@ -457,27 +475,7 @@ function buildRosterDocument(
                                     ${escapeHtml(row.reading)}
                                 </td>
 
-                                ${row.slots.map((slotItems) => {
-                        const content = slotItems
-                            .map((item) => `
-                                            <div class="${item.special
-                                    ? "special-text"
-                                    : "person-text"
-                                }">
-                                                ${escapeHtml(item.text)}
-                                            </div>
-                                        `)
-                            .join("");
-
-                        return `
-                                        <td class="${slotItems.some((item) => item.special)
-                                ? "special"
-                                : "person"
-                            }">
-                                            ${content}
-                                        </td>
-                                    `;
-                    }).join("")}
+                                ${slotCells}
                             </tr>
                         `;
                 })
@@ -688,7 +686,7 @@ export default function MonthlyScheduling() {
     const [freezeTimeInput, setFreezeTimeInput] = useState("7:00 AM");
     const [freezeNoteInput, setFreezeNoteInput] = useState("");
 
-    // Frozen date note editor (day panel)
+    // Frozen date note editor (day popup)
     const [editingFrozenId, setEditingFrozenId] = useState(null);
     const [frozenNoteDraft, setFrozenNoteDraft] = useState("");
     const [frozenTimeDraft, setFrozenTimeDraft] = useState("7:00 AM");
@@ -1015,16 +1013,49 @@ export default function MonthlyScheduling() {
         setSpecialText("");
     }
 
+    // Close the day popup and reset every editor inside it
+    function closeDayPanel() {
+        setSelectedDay(null);
+        cancelEditing();
+        cancelEditingFrozenNote();
+        cancelEditingSundayNote();
+    }
+
+    // Open the day popup for a date with clean editors
+    function openDayPanel(dateStr) {
+        setSelectedDay(dateStr);
+        cancelEditing();
+        cancelEditingFrozenNote();
+        cancelEditingSundayNote();
+    }
+
+    // Popup: close on Escape and stop the page scrolling behind it
+    useEffect(() => {
+        if (!selectedDay) return undefined;
+
+        const onKeyDown = (e) => {
+            if (e.key === "Escape") closeDayPanel();
+        };
+
+        document.addEventListener("keydown", onKeyDown);
+
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+
+        return () => {
+            document.removeEventListener("keydown", onKeyDown);
+            document.body.style.overflow = previousOverflow;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedDay]);
+
     async function selectForm(id) {
         setSelectedId(id);
         setMessage("");
         setError("");
         setDateInput("");
         setFreezeNoteInput("");
-        setSelectedDay(null);
-        cancelEditing();
-        cancelEditingFrozenNote();
-        cancelEditingSundayNote();
+        closeDayPanel();
 
         try {
             await Promise.all([
@@ -1136,10 +1167,7 @@ export default function MonthlyScheduling() {
             setSundaySlots([]);
             setDateInput("");
             setFreezeNoteInput("");
-            setSelectedDay(null);
-            cancelEditing();
-            cancelEditingFrozenNote();
-            cancelEditingSundayNote();
+            closeDayPanel();
 
             try {
                 await createGoogleFormFor(nextId);
@@ -1206,12 +1234,7 @@ export default function MonthlyScheduling() {
                 assignments,
                 sundaySlots
             ),
-        [
-            selectedForm?.month,
-            selectedForm?.year,
-            assignments,
-            sundaySlots,
-        ]
+        [selectedForm?.month, selectedForm?.year, assignments, sundaySlots]
     );
 
     const activeLectors = lectors.filter((lector) => lector.is_active);
@@ -1244,10 +1267,9 @@ export default function MonthlyScheduling() {
         return [];
     }, [selectedDay, calendarWeeks]);
 
-    // A date can now have several frozen times
+    // A date can have several frozen times
     const selectedFrozenDates = useMemo(
-        () =>
-            selectedDay ? getFrozenForDate(frozenDates, selectedDay) : [],
+        () => (selectedDay ? getFrozenForDate(frozenDates, selectedDay) : []),
         [selectedDay, frozenDates]
     );
 
@@ -1267,53 +1289,27 @@ export default function MonthlyScheduling() {
         setError("");
         setMessage("");
 
-        let result;
-
         try {
-            result = await request(
+            const result = await request(
                 `/monthly-forms/${selectedId}/${action}`,
                 { method: "PATCH" }
             );
+
+            await loadForms();
+
+            setMessage(
+                result.message ||
+                (action === "close"
+                    ? "Monthly form closed. You can now freeze dates."
+                    : "Monthly form reopened.")
+            );
         } catch (err) {
             setError(err.message);
+        } finally {
             setWorking(false);
-            return;
         }
-
-        // Make the Google Form match the database state.
-        let googleError = "";
-
-        try {
-            await request(`/google-forms/${selectedId}/sync-status`, {
-                method: "POST",
-            });
-        } catch (err) {
-            googleError = err.message;
-        }
-
-        try {
-            await loadForms();
-        } catch {
-            // loadForms reports its own errors.
-        }
-
-        setMessage(
-            result.message ||
-            (action === "close"
-                ? "Monthly form closed. You can now freeze dates."
-                : "Monthly form reopened.")
-        );
-
-        if (googleError) {
-            setError(
-                `The monthly form was updated, but the Google Form could not be ${
-                    action === "close" ? "closed" : "reopened"
-                }: ${googleError}`
-            );
-        }
-
-        setWorking(false);
     }
+
     // ---------------- FROZEN DATES ----------------
 
     async function addFrozenDate() {
@@ -1454,7 +1450,7 @@ export default function MonthlyScheduling() {
 
         if (
             !window.confirm(
-                `Delete ALL ${assignments.length} assignment positions for this month, including manual assignments, frozen dates and notes, and Sunday Mass notes? You can freeze and generate again afterwards.`
+                `Delete ALL ${assignments.length} assignment positions for this month, including manual assignments? Frozen dates and notes are kept. You can generate positions again afterwards.`
             )
         ) {
             return;
@@ -1470,13 +1466,10 @@ export default function MonthlyScheduling() {
                 { method: "DELETE" }
             );
 
-            cancelEditing();
-            setSelectedDay(null);
+            closeDayPanel();
 
-            cancelEditingFrozenNote();
-            cancelEditingSundayNote();
-
-            // Reload everything so the calendar matches the backend.
+            // Reload everything so frozen dates and Sunday notes
+            // stay in sync with the backend.
             await Promise.all([
                 loadAssignments(selectedId),
                 loadFrozenDates(selectedId),
@@ -1500,11 +1493,7 @@ export default function MonthlyScheduling() {
         }
 
         setEditingAssignmentId(item.id);
-
-        setManualLectorId(
-            item.lector_id != null ? String(item.lector_id) : ""
-        );
-
+        setManualLectorId(item.lector_id != null ? String(item.lector_id) : "");
         setSpecialText(item.special_text || "");
         setAssignmentMode(item.special_text ? "text" : "lector");
         setOverrideAvailability(false);
@@ -1512,10 +1501,7 @@ export default function MonthlyScheduling() {
         setMessage("");
     }
 
-    async function saveManualAssignment(
-        assignmentId,
-        allowOverride = false
-    ) {
+    async function saveManualAssignment(assignmentId, allowOverride = false) {
         if (!manualLectorId) {
             setError("Please select a lector.");
             return;
@@ -1561,7 +1547,9 @@ export default function MonthlyScheduling() {
             ) {
                 const confirmed = window.confirm(
                     "Availability warnings:\n\n" +
-                    detail.warnings.map((warning) => `• ${warning}`).join("\n") +
+                    detail.warnings
+                        .map((warning) => `• ${warning}`)
+                        .join("\n") +
                     "\n\nDo you want to assign this lector anyway?"
                 );
 
@@ -1603,9 +1591,7 @@ export default function MonthlyScheduling() {
             cancelEditing();
             await loadAssignments(selectedId);
 
-            setMessage(
-                result.message || "Custom text saved successfully."
-            );
+            setMessage(result.message || "Custom text saved successfully.");
         } catch (err) {
             setError(err.message || "Could not save custom text.");
         } finally {
@@ -1660,6 +1646,7 @@ export default function MonthlyScheduling() {
             sundaySlots,
             frozenDates
         );
+
         const monthLabel =
             selectedForm.title ||
             `${selectedForm.month || "month"}-${selectedForm.year || ""}`;
@@ -1731,8 +1718,12 @@ export default function MonthlyScheduling() {
                 </button>
             </div>
 
-            {error && <div className="notice-error">{String(error)}</div>}
-            {message && <div className="notice-success">{message}</div>}
+            {error && !selectedDay && (
+                <div className="notice-error">{String(error)}</div>
+            )}
+            {message && !selectedDay && (
+                <div className="notice-success">{message}</div>
+            )}
 
             {/* SELECT MONTH + CLOSE FORM */}
             <section className="content-card">
@@ -1771,7 +1762,9 @@ export default function MonthlyScheduling() {
 
                         <div className="schedule-actions">
                             <span
-                                className={`status-pill ${isClosed ? "status-inactive" : "status-active"
+                                className={`status-pill ${isClosed
+                                    ? "status-inactive"
+                                    : "status-active"
                                     }`}
                             >
                                 {isClosed ? (
@@ -1914,7 +1907,9 @@ export default function MonthlyScheduling() {
                             <select
                                 className="form-select"
                                 value={freezeTimeInput}
-                                onChange={(e) => setFreezeTimeInput(e.target.value)}
+                                onChange={(e) =>
+                                    setFreezeTimeInput(e.target.value)
+                                }
                                 disabled={working}
                             >
                                 {ROSTER_SLOTS.map((time) => (
@@ -1929,7 +1924,9 @@ export default function MonthlyScheduling() {
                                 className="form-select"
                                 placeholder="Enter note"
                                 value={freezeNoteInput}
-                                onChange={(e) => setFreezeNoteInput(e.target.value)}
+                                onChange={(e) =>
+                                    setFreezeNoteInput(e.target.value)
+                                }
                                 maxLength={100}
                                 disabled={working}
                             />
@@ -1946,7 +1943,7 @@ export default function MonthlyScheduling() {
                         </div>
                     )}
 
-                    {!freezeDone && error && (
+                    {!freezeDone && error && !selectedDay && (
                         <div className="notice-error" style={{ marginTop: 14 }}>
                             {String(error)}
                         </div>
@@ -1966,7 +1963,8 @@ export default function MonthlyScheduling() {
                                         : "Remove frozen date"
                                 }
                             >
-                                {getDateOnly(item.frozen_date)} · {getFrozenTime(item)}
+                                {getDateOnly(item.frozen_date)} ·{" "}
+                                {getFrozenTime(item)}
                                 {!freezeDone && <X size={14} />}
                             </button>
                         ))}
@@ -2120,9 +2118,9 @@ export default function MonthlyScheduling() {
                                         : ""}
                                 </h2>
                                 <p>
-                                    Click a date to view its assignments.
-                                    Click Sunday 7:30 AM or 9:45 AM to edit
-                                    that Mass note directly.
+                                    Click a date to view its assignments in a
+                                    popup. Click Sunday 7:30 AM or 9:45 AM to
+                                    edit that Mass note directly.
                                 </p>
                             </div>
                             <CalendarDays size={25} className="soft-icon" />
@@ -2217,12 +2215,9 @@ export default function MonthlyScheduling() {
                                                     ? "cal-selected"
                                                     : ""
                                                     } ${fullyFrozen ? "cal-frozen" : ""}`}
-                                                onClick={() => {
-                                                    setSelectedDay(cell.dateStr);
-                                                    cancelEditing();
-                                                    cancelEditingFrozenNote();
-                                                    cancelEditingSundayNote();
-                                                }}
+                                                onClick={() =>
+                                                    openDayPanel(cell.dateStr)
+                                                }
                                             >
                                                 <div className="cal-date-row">
                                                     <span className="cal-date">
@@ -2279,11 +2274,9 @@ export default function MonthlyScheduling() {
                                                                         className="cal-line sunday-slot-note-button"
                                                                         onClick={(e) => {
                                                                             e.stopPropagation();
-                                                                            setSelectedDay(
+                                                                            openDayPanel(
                                                                                 cell.dateStr
                                                                             );
-                                                                            cancelEditing();
-                                                                            cancelEditingFrozenNote();
                                                                             startEditingSundayNote(
                                                                                 slot
                                                                             );
@@ -2311,25 +2304,33 @@ export default function MonthlyScheduling() {
                                                                 {group.time}
                                                             </span>
 
-                                                            {group.items.map((item) => (
-                                                                <span
-                                                                    key={item.id}
-                                                                    className={`cal-line ${item.special_text
-                                                                        ? "cal-line-special"
-                                                                        : item.lector_id == null
-                                                                            ? "cal-line-empty"
-                                                                            : ""
-                                                                        }`}
-                                                                >
-                                                                    <b>
-                                                                        {getReadingLabel(item) || "—"}
-                                                                    </b>{" "}
-                                                                    {item.lector_id != null ||
-                                                                        item.special_text
-                                                                        ? getAssignmentName(item)
-                                                                        : "—"}
-                                                                </span>
-                                                            ))}
+                                                            {group.items.map(
+                                                                (item) => (
+                                                                    <span
+                                                                        key={item.id}
+                                                                        className={`cal-line ${item.special_text
+                                                                            ? "cal-line-special"
+                                                                            : item.lector_id ==
+                                                                                null
+                                                                                ? "cal-line-empty"
+                                                                                : ""
+                                                                            }`}
+                                                                    >
+                                                                        <b>
+                                                                            {getReadingLabel(
+                                                                                item
+                                                                            ) || "—"}
+                                                                        </b>{" "}
+                                                                        {item.lector_id !=
+                                                                            null ||
+                                                                            item.special_text
+                                                                            ? getAssignmentName(
+                                                                                item
+                                                                            )
+                                                                            : "—"}
+                                                                    </span>
+                                                                )
+                                                            )}
                                                         </div>
                                                     ))}
                                                 </div>
@@ -2340,617 +2341,6 @@ export default function MonthlyScheduling() {
                             </div>
                         )}
                     </section>
-
-                    {/* DAY DETAIL / EDIT PANEL */}
-                    {selectedDay && (
-                        <section className="content-card">
-                            <div className="section-heading">
-                                <div>
-                                    <h2>
-                                        {new Date(
-                                            `${selectedDay}T12:00:00`
-                                        ).toLocaleDateString("en-GB", {
-                                            weekday: "long",
-                                            day: "numeric",
-                                            month: "long",
-                                            year: "numeric",
-                                        })}
-                                    </h2>
-
-                                    <p>
-                                        View the Sunday Mass notes, Frozen Date
-                                        Notes, and normal assignment positions
-                                        separately.
-                                    </p>
-                                </div>
-
-                                <button
-                                    type="button"
-                                    className="secondary-button"
-                                    onClick={() => {
-                                        setSelectedDay(null);
-                                        cancelEditing();
-                                        cancelEditingFrozenNote();
-                                        cancelEditingSundayNote();
-                                    }}
-                                >
-                                    <X size={15} />
-                                    Close
-                                </button>
-                            </div>
-
-                            {/* SUNDAY 7:30 AM AND 9:45 AM NOTE EDITORS */}
-                            {selectedDaySundaySlots.length > 0 && (
-                                <div className="calendar-mass-list">
-                                    {SUNDAY_SPECIAL_TIMES.map((time) => {
-                                        const slot =
-                                            selectedDaySundaySlots.find(
-                                                (item) =>
-                                                    isSundaySlot(item, time)
-                                            );
-
-                                        if (!slot) return null;
-
-                                        const isEditingThisSlot =
-                                            editingSundayNote &&
-                                            selectedSundaySlot &&
-                                            selectedSundaySlot.mass_slot_id ===
-                                            slot.mass_slot_id &&
-                                            getSundaySlotDate(
-                                                selectedSundaySlot
-                                            ) === getSundaySlotDate(slot);
-
-                                        return (
-                                            <div
-                                                className="calendar-assignment"
-                                                key={`${selectedDay}-${time}`}
-                                            >
-                                                <div className="calendar-assignment-main">
-                                                    <div className="calendar-assignment-time">
-                                                        <strong>{time}</strong>
-                                                        <span>Sunday Special Mass</span>
-                                                    </div>
-
-                                                    <div className="calendar-assignment-info">
-                                                        <strong>Mass Note</strong>
-                                                        <span>
-                                                            {slot.note ||
-                                                                "No note added."}
-                                                        </span>
-                                                    </div>
-
-                                                    <span className="status-pill status-active">
-                                                        No Positions
-                                                    </span>
-                                                </div>
-
-                                                {!isEditingThisSlot && (
-                                                    <div className="calendar-assignment-actions">
-                                                        <button
-                                                            type="button"
-                                                            className="secondary-button"
-                                                            onClick={() =>
-                                                                startEditingSundayNote(
-                                                                    slot
-                                                                )
-                                                            }
-                                                            disabled={working}
-                                                        >
-                                                            <Pencil size={15} />
-                                                            {slot.note
-                                                                ? "Edit Note"
-                                                                : "Add Note"}
-                                                        </button>
-                                                    </div>
-                                                )}
-
-                                                {isEditingThisSlot && (
-                                                    <div className="manual-editor">
-                                                        <h4>
-                                                            {time} Mass Note
-                                                        </h4>
-
-                                                        <label
-                                                            htmlFor={`sunday-note-${time.replace(
-                                                                /[^0-9]/g,
-                                                                ""
-                                                            )}`}
-                                                        >
-                                                            Enter note
-                                                        </label>
-
-                                                        <textarea
-                                                            id={`sunday-note-${time.replace(
-                                                                /[^0-9]/g,
-                                                                ""
-                                                            )}`}
-                                                            className="form-select"
-                                                            rows={3}
-                                                            maxLength={1000}
-                                                            value={sundayNoteDraft}
-                                                            onChange={(e) =>
-                                                                setSundayNoteDraft(
-                                                                    e.target.value
-                                                                )
-                                                            }
-                                                            placeholder={`Enter a note for the Sunday ${time} Mass`}
-                                                            disabled={working}
-                                                        />
-
-                                                        <p className="field-hint">
-                                                            This note is saved
-                                                            separately for this
-                                                            Sunday date and Mass
-                                                            time. It does not
-                                                            create assignment
-                                                            positions.
-                                                        </p>
-
-                                                        <div className="schedule-actions">
-                                                            <button
-                                                                type="button"
-                                                                className="primary-button"
-                                                                onClick={saveSundayNote}
-                                                                disabled={working}
-                                                            >
-                                                                {working
-                                                                    ? "Saving..."
-                                                                    : "Save Note"}
-                                                            </button>
-
-                                                            <button
-                                                                type="button"
-                                                                className="secondary-button"
-                                                                onClick={cancelEditingSundayNote}
-                                                                disabled={working}
-                                                            >
-                                                                Cancel
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-
-                            {/* FROZEN DATE NOTE EDITORS - ONE PER FROZEN TIME */}
-                            {selectedFrozenDates.map((fd) => (
-                                <div className="empty-state" key={fd.id}>
-                                    {editingFrozenId === fd.id ? (
-                                        <div style={{ width: "100%" }}>
-                                            <label htmlFor={`frozen-time-${fd.id}`}>
-                                                Time
-                                            </label>
-
-                                            <select
-                                                id={`frozen-time-${fd.id}`}
-                                                className="form-select"
-                                                value={frozenTimeDraft}
-                                                onChange={(e) =>
-                                                    setFrozenTimeDraft(
-                                                        e.target.value
-                                                    )
-                                                }
-                                                disabled={working}
-                                            >
-                                                {ROSTER_SLOTS.map((time) => (
-                                                    <option
-                                                        key={time}
-                                                        value={time}
-                                                    >
-                                                        {time}
-                                                    </option>
-                                                ))}
-                                            </select>
-
-                                            <label htmlFor={`frozen-note-${fd.id}`}>
-                                                Frozen Date Note
-                                            </label>
-
-                                            <input
-                                                id={`frozen-note-${fd.id}`}
-                                                type="text"
-                                                autoFocus
-                                                className="form-select"
-                                                maxLength={100}
-                                                placeholder="Enter a note, e.g. St. Anne's Community"
-                                                value={frozenNoteDraft}
-                                                onChange={(e) =>
-                                                    setFrozenNoteDraft(
-                                                        e.target.value
-                                                    )
-                                                }
-                                                disabled={working}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === "Enter") {
-                                                        e.preventDefault();
-                                                        saveFrozenNote();
-                                                    }
-
-                                                    if (e.key === "Escape") {
-                                                        cancelEditingFrozenNote();
-                                                    }
-                                                }}
-                                            />
-
-                                            <p className="field-hint">
-                                                Maximum 100 characters. The
-                                                note appears in the selected
-                                                time column of the downloaded
-                                                roster.
-                                            </p>
-
-                                            <div className="schedule-actions">
-                                                <button
-                                                    type="button"
-                                                    className="primary-button"
-                                                    onClick={saveFrozenNote}
-                                                    disabled={working}
-                                                >
-                                                    {working
-                                                        ? "Saving..."
-                                                        : "Save Note"}
-                                                </button>
-
-                                                <button
-                                                    type="button"
-                                                    className="secondary-button"
-                                                    onClick={cancelEditingFrozenNote}
-                                                    disabled={working}
-                                                >
-                                                    Cancel
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div style={{ width: "100%" }}>
-                                            <p>
-                                                <strong>
-                                                    Frozen Date Note (
-                                                    {getFrozenTime(fd)}
-                                                    ):
-                                                </strong>{" "}
-                                                {fd.reason || "No note added."}
-                                            </p>
-
-                                            <div className="schedule-actions">
-                                                <button
-                                                    type="button"
-                                                    className="secondary-button"
-                                                    onClick={() =>
-                                                        startEditingFrozenNote(fd)
-                                                    }
-                                                    disabled={working}
-                                                >
-                                                    <Pencil size={15} />
-                                                    Edit Frozen Date Note
-                                                </button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-
-                            {/* NORMAL ASSIGNMENT POSITIONS */}
-                            {selectedDayItems.length === 0 ? (
-                                <p className="empty-state">
-                                    No normal assignment positions on this date.
-                                </p>
-                            ) : (
-                                <div className="calendar-mass-list">
-                                    {selectedDayItems.map((item) => {
-                                        const isEditing =
-                                            editingAssignmentId === item.id;
-
-                                        const blocked = !scheduleUnlocked;
-
-                                        const itemTime = formatMassTime(
-                                            getMassTime(item)
-                                        );
-
-                                        const itemFrozen = isSlotFrozen(
-                                            frozenDates,
-                                            selectedDay,
-                                            itemTime
-                                        );
-
-                                        return (
-                                            <div
-                                                className="calendar-assignment"
-                                                key={item.id}
-                                            >
-                                                <div className="calendar-assignment-main">
-                                                    <div className="calendar-assignment-time">
-                                                        <strong>
-                                                            {itemTime}
-                                                        </strong>
-
-                                                        <span>
-                                                            {item.mass_type ||
-                                                                item.mass_slot?.mass_type ||
-                                                                "Mass"}
-                                                        </span>
-                                                    </div>
-
-                                                    <div className="calendar-assignment-info">
-                                                        <strong>
-                                                            {item.responsibility}
-                                                        </strong>
-
-                                                        <span>
-                                                            Position{" "}
-                                                            {item.position_number}
-                                                        </span>
-
-                                                        <span
-                                                            className={
-                                                                item.lector_id != null ||
-                                                                    item.special_text
-                                                                    ? "assignment-lector"
-                                                                    : "assignment-unfilled"
-                                                            }
-                                                        >
-                                                            <UsersRound size={15} />
-                                                            {getAssignmentName(item)}
-                                                        </span>
-                                                    </div>
-
-                                                    <span
-                                                        className={`status-pill ${item.lector_id != null ||
-                                                            item.special_text
-                                                            ? "status-active"
-                                                            : "status-pending"
-                                                            }`}
-                                                    >
-                                                        {item.special_text
-                                                            ? "Custom Text"
-                                                            : item.lector_id != null
-                                                                ? "Assigned"
-                                                                : "Unassigned"}
-                                                    </span>
-                                                </div>
-
-                                                <div className="calendar-assignment-actions">
-                                                    {itemFrozen && (
-                                                        <span className="field-hint">
-                                                            Frozen time
-                                                        </span>
-                                                    )}
-
-                                                    {item.is_manual && (
-                                                        <span className="field-hint">
-                                                            Manual
-                                                        </span>
-                                                    )}
-
-                                                    {item.is_protected && (
-                                                        <span className="field-hint">
-                                                            Protected
-                                                        </span>
-                                                    )}
-
-                                                    <button
-                                                        type="button"
-                                                        className="secondary-button"
-                                                        disabled={working || blocked}
-                                                        onClick={() =>
-                                                            startEditing(item)
-                                                        }
-                                                    >
-                                                        <Pencil size={15} />
-                                                        Edit
-                                                    </button>
-
-                                                    <button
-                                                        type="button"
-                                                        className="secondary-button"
-                                                        disabled={working || blocked}
-                                                        onClick={() =>
-                                                            clearManualAssignment(
-                                                                item.id
-                                                            )
-                                                        }
-                                                    >
-                                                        <Trash2 size={15} />
-                                                        Clear Position
-                                                    </button>
-                                                </div>
-
-                                                {isEditing && (
-                                                    <div className="manual-editor">
-                                                        <h4>
-                                                            Edit Assignment Position
-                                                        </h4>
-
-                                                        <div className="schedule-actions">
-                                                            <button
-                                                                type="button"
-                                                                className={
-                                                                    assignmentMode ===
-                                                                        "lector"
-                                                                        ? "primary-button"
-                                                                        : "secondary-button"
-                                                                }
-                                                                onClick={() =>
-                                                                    setAssignmentMode(
-                                                                        "lector"
-                                                                    )
-                                                                }
-                                                                disabled={working}
-                                                            >
-                                                                <UsersRound size={16} />
-                                                                Assign Lector
-                                                            </button>
-
-                                                            <button
-                                                                type="button"
-                                                                className={
-                                                                    assignmentMode ===
-                                                                        "text"
-                                                                        ? "primary-button"
-                                                                        : "secondary-button"
-                                                                }
-                                                                onClick={() =>
-                                                                    setAssignmentMode(
-                                                                        "text"
-                                                                    )
-                                                                }
-                                                                disabled={working}
-                                                            >
-                                                                <Pencil size={16} />
-                                                                Custom Text
-                                                            </button>
-                                                        </div>
-
-                                                        {assignmentMode === "lector" ? (
-                                                            <>
-                                                                <label>
-                                                                    Select an active lector
-                                                                </label>
-
-                                                                <select
-                                                                    className="form-select"
-                                                                    value={manualLectorId}
-                                                                    onChange={(e) =>
-                                                                        setManualLectorId(
-                                                                            e.target.value
-                                                                        )
-                                                                    }
-                                                                >
-                                                                    <option value="">
-                                                                        Choose a lector
-                                                                    </option>
-
-                                                                    {activeLectors.map(
-                                                                        (lector) => (
-                                                                            <option
-                                                                                key={lector.id}
-                                                                                value={lector.id}
-                                                                            >
-                                                                                {getLectorName(
-                                                                                    lector,
-                                                                                    lector.id
-                                                                                )}
-                                                                            </option>
-                                                                        )
-                                                                    )}
-                                                                </select>
-
-                                                                <p className="field-hint">
-                                                                    Hard scheduling
-                                                                    conflicts, such
-                                                                    as consecutive
-                                                                    serving days,
-                                                                    are still checked
-                                                                    by the backend.
-                                                                </p>
-
-                                                                <div className="schedule-actions">
-                                                                    <button
-                                                                        type="button"
-                                                                        className="primary-button"
-                                                                        disabled={
-                                                                            working ||
-                                                                            !manualLectorId
-                                                                        }
-                                                                        onClick={() =>
-                                                                            saveManualAssignment(
-                                                                                item.id
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        Save Assignment
-                                                                    </button>
-                                                                </div>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <label>
-                                                                    Enter Custom Text
-                                                                </label>
-
-                                                                <input
-                                                                    type="text"
-                                                                    className="form-select"
-                                                                    value={specialText}
-                                                                    onChange={(e) =>
-                                                                        setSpecialText(
-                                                                            e.target.value
-                                                                        )
-                                                                    }
-                                                                    maxLength={100}
-                                                                    placeholder="e.g. Zone 1, Sunday School, Youth Group"
-                                                                    disabled={working}
-                                                                />
-
-                                                                <p className="field-hint">
-                                                                    Custom text
-                                                                    replaces the
-                                                                    lector name in
-                                                                    this existing
-                                                                    position.
-                                                                    Maximum 100
-                                                                    characters.
-                                                                </p>
-
-                                                                <div className="schedule-actions">
-                                                                    <button
-                                                                        type="button"
-                                                                        className="primary-button"
-                                                                        disabled={
-                                                                            working ||
-                                                                            !specialText.trim()
-                                                                        }
-                                                                        onClick={() =>
-                                                                            saveSpecialText(
-                                                                                item.id
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        Save Custom Text
-                                                                    </button>
-
-                                                                    <button
-                                                                        type="button"
-                                                                        className="secondary-button"
-                                                                        disabled={
-                                                                            working ||
-                                                                            !item.special_text
-                                                                        }
-                                                                        onClick={() =>
-                                                                            saveSpecialText(
-                                                                                item.id,
-                                                                                ""
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        Clear Custom Text
-                                                                    </button>
-                                                                </div>
-                                                            </>
-                                                        )}
-
-                                                        <div className="schedule-actions">
-                                                            <button
-                                                                type="button"
-                                                                className="secondary-button"
-                                                                disabled={working}
-                                                                onClick={cancelEditing}
-                                                            >
-                                                                Cancel
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </section>
-                    )}
 
                     {/* DOWNLOAD */}
                     <section className="content-card">
@@ -2992,6 +2382,748 @@ export default function MonthlyScheduling() {
                             table is generated when you download the roster.
                         </p>
                     </section>
+
+                    {/* DAY DETAIL / EDIT POPUP */}
+                    {selectedDay && createPortal(
+                        <div className="monthly-scheduling">
+                        <div
+                            className="day-modal-overlay"
+                            onMouseDown={(e) => {
+                                if (e.target === e.currentTarget) {
+                                    closeDayPanel();
+                                }
+                            }}
+                        >
+                            <section
+                                className="day-modal"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-label="Day details"
+                            >
+                                <div className="day-modal-header">
+                                    <div>
+                                        <h2>
+                                            {new Date(
+                                                `${selectedDay}T12:00:00`
+                                            ).toLocaleDateString("en-GB", {
+                                                weekday: "long",
+                                                day: "numeric",
+                                                month: "long",
+                                                year: "numeric",
+                                            })}
+                                        </h2>
+
+                                        <p>
+                                            View the Sunday Mass notes, Frozen
+                                            Date Notes, and normal assignment
+                                            positions separately.
+                                        </p>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        className="secondary-button"
+                                        onClick={closeDayPanel}
+                                    >
+                                        <X size={15} />
+                                        Close
+                                    </button>
+                                </div>
+
+                                <div className="day-modal-body">
+                                    {/* Page-level messages are hidden behind the popup */}
+                                    {error && (
+                                        <div className="notice-error">
+                                            {String(error)}
+                                        </div>
+                                    )}
+                                    {message && (
+                                        <div className="notice-success">
+                                            {message}
+                                        </div>
+                                    )}
+
+                                    {/* SUNDAY 7:30 AM AND 9:45 AM NOTE EDITORS */}
+                                    {selectedDaySundaySlots.length > 0 && (
+                                        <div className="calendar-mass-list">
+                                            {SUNDAY_SPECIAL_TIMES.map((time) => {
+                                                const slot =
+                                                    selectedDaySundaySlots.find(
+                                                        (item) =>
+                                                            isSundaySlot(
+                                                                item,
+                                                                time
+                                                            )
+                                                    );
+
+                                                if (!slot) return null;
+
+                                                const isEditingThisSlot =
+                                                    editingSundayNote &&
+                                                    selectedSundaySlot &&
+                                                    selectedSundaySlot.mass_slot_id ===
+                                                    slot.mass_slot_id &&
+                                                    getSundaySlotDate(
+                                                        selectedSundaySlot
+                                                    ) ===
+                                                    getSundaySlotDate(slot);
+
+                                                const noteId = `sunday-note-${time.replace(
+                                                    /[^0-9]/g,
+                                                    ""
+                                                )}`;
+
+                                                return (
+                                                    <div
+                                                        className="calendar-assignment"
+                                                        key={`${selectedDay}-${time}`}
+                                                    >
+                                                        <div className="calendar-assignment-main">
+                                                            <div className="calendar-assignment-time">
+                                                                <strong>
+                                                                    {time}
+                                                                </strong>
+                                                                <span>
+                                                                    Sunday Special
+                                                                    Mass
+                                                                </span>
+                                                            </div>
+
+                                                            <div className="calendar-assignment-info">
+                                                                <strong>
+                                                                    Mass Note
+                                                                </strong>
+                                                                <span>
+                                                                    {slot.note ||
+                                                                        "No note added."}
+                                                                </span>
+                                                            </div>
+
+                                                            <span className="status-pill status-active">
+                                                                No Positions
+                                                            </span>
+                                                        </div>
+
+                                                        {!isEditingThisSlot && (
+                                                            <div className="calendar-assignment-actions">
+                                                                <button
+                                                                    type="button"
+                                                                    className="secondary-button"
+                                                                    onClick={() =>
+                                                                        startEditingSundayNote(
+                                                                            slot
+                                                                        )
+                                                                    }
+                                                                    disabled={working}
+                                                                >
+                                                                    <Pencil size={15} />
+                                                                    {slot.note
+                                                                        ? "Edit Note"
+                                                                        : "Add Note"}
+                                                                </button>
+                                                            </div>
+                                                        )}
+
+                                                        {isEditingThisSlot && (
+                                                            <div className="manual-editor">
+                                                                <h4>
+                                                                    {time} Mass Note
+                                                                </h4>
+
+                                                                <label htmlFor={noteId}>
+                                                                    Enter note
+                                                                </label>
+
+                                                                <textarea
+                                                                    id={noteId}
+                                                                    className="form-select"
+                                                                    rows={3}
+                                                                    maxLength={1000}
+                                                                    value={
+                                                                        sundayNoteDraft
+                                                                    }
+                                                                    onChange={(e) =>
+                                                                        setSundayNoteDraft(
+                                                                            e.target
+                                                                                .value
+                                                                        )
+                                                                    }
+                                                                    placeholder={`Enter a note for the Sunday ${time} Mass`}
+                                                                    disabled={working}
+                                                                />
+
+                                                                <p className="field-hint">
+                                                                    This note is saved
+                                                                    separately for this
+                                                                    Sunday date and
+                                                                    Mass time. It does
+                                                                    not create
+                                                                    assignment
+                                                                    positions.
+                                                                </p>
+
+                                                                <div className="schedule-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="primary-button"
+                                                                        onClick={
+                                                                            saveSundayNote
+                                                                        }
+                                                                        disabled={working}
+                                                                    >
+                                                                        {working
+                                                                            ? "Saving..."
+                                                                            : "Save Note"}
+                                                                    </button>
+
+                                                                    <button
+                                                                        type="button"
+                                                                        className="secondary-button"
+                                                                        onClick={
+                                                                            cancelEditingSundayNote
+                                                                        }
+                                                                        disabled={working}
+                                                                    >
+                                                                        Cancel
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {/* FROZEN DATE NOTE EDITORS - ONE PER FROZEN TIME */}
+                                    {selectedFrozenDates.map((fd) => (
+                                        <div className="empty-state" key={fd.id}>
+                                            {editingFrozenId === fd.id ? (
+                                                <div
+                                                    style={{
+                                                        width: "100%",
+                                                        textAlign: "left",
+                                                    }}
+                                                >
+                                                    <label
+                                                        htmlFor={`frozen-time-${fd.id}`}
+                                                    >
+                                                        Time
+                                                    </label>
+
+                                                    <select
+                                                        id={`frozen-time-${fd.id}`}
+                                                        className="form-select"
+                                                        value={frozenTimeDraft}
+                                                        onChange={(e) =>
+                                                            setFrozenTimeDraft(
+                                                                e.target.value
+                                                            )
+                                                        }
+                                                        disabled={working}
+                                                    >
+                                                        {ROSTER_SLOTS.map((time) => (
+                                                            <option
+                                                                key={time}
+                                                                value={time}
+                                                            >
+                                                                {time}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+
+                                                    <label
+                                                        htmlFor={`frozen-note-${fd.id}`}
+                                                        style={{ marginTop: 12 }}
+                                                    >
+                                                        Frozen Date Note
+                                                    </label>
+
+                                                    <input
+                                                        id={`frozen-note-${fd.id}`}
+                                                        type="text"
+                                                        autoFocus
+                                                        className="form-select"
+                                                        maxLength={100}
+                                                        placeholder="Enter a note, e.g. St. Anne's Community"
+                                                        value={frozenNoteDraft}
+                                                        onChange={(e) =>
+                                                            setFrozenNoteDraft(
+                                                                e.target.value
+                                                            )
+                                                        }
+                                                        disabled={working}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === "Enter") {
+                                                                e.preventDefault();
+                                                                saveFrozenNote();
+                                                            }
+
+                                                            if (e.key === "Escape") {
+                                                                e.stopPropagation();
+                                                                cancelEditingFrozenNote();
+                                                            }
+                                                        }}
+                                                    />
+
+                                                    <p className="field-hint">
+                                                        Maximum 100 characters. The
+                                                        note appears in the selected
+                                                        time column of the
+                                                        downloaded roster.
+                                                    </p>
+
+                                                    <div className="schedule-actions">
+                                                        <button
+                                                            type="button"
+                                                            className="primary-button"
+                                                            onClick={saveFrozenNote}
+                                                            disabled={working}
+                                                        >
+                                                            {working
+                                                                ? "Saving..."
+                                                                : "Save Note"}
+                                                        </button>
+
+                                                        <button
+                                                            type="button"
+                                                            className="secondary-button"
+                                                            onClick={
+                                                                cancelEditingFrozenNote
+                                                            }
+                                                            disabled={working}
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div style={{ width: "100%" }}>
+                                                    <p style={{ margin: 0 }}>
+                                                        <strong>
+                                                            Frozen Date Note (
+                                                            {getFrozenTime(fd)}
+                                                            ):
+                                                        </strong>{" "}
+                                                        {fd.reason ||
+                                                            "No note added."}
+                                                    </p>
+
+                                                    <div
+                                                        className="schedule-actions"
+                                                        style={{
+                                                            justifyContent: "center",
+                                                        }}
+                                                    >
+                                                        <button
+                                                            type="button"
+                                                            className="secondary-button"
+                                                            onClick={() =>
+                                                                startEditingFrozenNote(
+                                                                    fd
+                                                                )
+                                                            }
+                                                            disabled={working}
+                                                        >
+                                                            <Pencil size={15} />
+                                                            Edit Frozen Date Note
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+
+                                    {/* NORMAL ASSIGNMENT POSITIONS */}
+                                    {selectedDayItems.length === 0 ? (
+                                        <p className="empty-state">
+                                            No normal assignment positions on this
+                                            date.
+                                        </p>
+                                    ) : (
+                                        <div className="calendar-mass-list">
+                                            {selectedDayItems.map((item) => {
+                                                const isEditing =
+                                                    editingAssignmentId === item.id;
+
+                                                const blocked = !scheduleUnlocked;
+
+                                                const itemTime = formatMassTime(
+                                                    getMassTime(item)
+                                                );
+
+                                                const itemFrozen = isSlotFrozen(
+                                                    frozenDates,
+                                                    selectedDay,
+                                                    itemTime
+                                                );
+
+                                                const hasValue =
+                                                    item.lector_id != null ||
+                                                    Boolean(item.special_text);
+
+                                                return (
+                                                    <div
+                                                        className="calendar-assignment"
+                                                        key={item.id}
+                                                    >
+                                                        <div className="calendar-assignment-main">
+                                                            <div className="calendar-assignment-time">
+                                                                <strong>
+                                                                    {itemTime}
+                                                                </strong>
+
+                                                                <span>
+                                                                    {item.mass_type ||
+                                                                        item.mass_slot
+                                                                            ?.mass_type ||
+                                                                        "Mass"}
+                                                                </span>
+                                                            </div>
+
+                                                            <div className="calendar-assignment-info">
+                                                                <strong>
+                                                                    {
+                                                                        item.responsibility
+                                                                    }
+                                                                </strong>
+
+                                                                <span>
+                                                                    Position{" "}
+                                                                    {
+                                                                        item.position_number
+                                                                    }
+                                                                </span>
+
+                                                                <span
+                                                                    className={
+                                                                        hasValue
+                                                                            ? "assignment-lector"
+                                                                            : "assignment-unfilled"
+                                                                    }
+                                                                >
+                                                                    <UsersRound
+                                                                        size={15}
+                                                                    />
+                                                                    {getAssignmentName(
+                                                                        item
+                                                                    )}
+                                                                </span>
+                                                            </div>
+
+                                                            <span
+                                                                className={`status-pill ${hasValue
+                                                                    ? "status-active"
+                                                                    : "status-pending"
+                                                                    }`}
+                                                            >
+                                                                {item.special_text
+                                                                    ? "Custom Text"
+                                                                    : item.lector_id !=
+                                                                        null
+                                                                        ? "Assigned"
+                                                                        : "Unassigned"}
+                                                            </span>
+                                                        </div>
+
+                                                        <div className="calendar-assignment-actions">
+                                                            {itemFrozen && (
+                                                                <span className="field-hint">
+                                                                    Frozen time
+                                                                </span>
+                                                            )}
+
+                                                            {item.is_manual && (
+                                                                <span className="field-hint">
+                                                                    Manual
+                                                                </span>
+                                                            )}
+
+                                                            {item.is_protected && (
+                                                                <span className="field-hint">
+                                                                    Protected
+                                                                </span>
+                                                            )}
+
+                                                            <button
+                                                                type="button"
+                                                                className="secondary-button"
+                                                                disabled={
+                                                                    working || blocked
+                                                                }
+                                                                onClick={() =>
+                                                                    startEditing(item)
+                                                                }
+                                                            >
+                                                                <Pencil size={15} />
+                                                                Edit
+                                                            </button>
+
+                                                            <button
+                                                                type="button"
+                                                                className="secondary-button"
+                                                                disabled={
+                                                                    working || blocked
+                                                                }
+                                                                onClick={() =>
+                                                                    clearManualAssignment(
+                                                                        item.id
+                                                                    )
+                                                                }
+                                                            >
+                                                                <Trash2 size={15} />
+                                                                Clear Position
+                                                            </button>
+                                                        </div>
+
+                                                        {isEditing && (
+                                                            <div className="manual-editor">
+                                                                <h4>
+                                                                    Edit Assignment
+                                                                    Position
+                                                                </h4>
+
+                                                                <div className="schedule-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className={
+                                                                            assignmentMode ===
+                                                                                "lector"
+                                                                                ? "primary-button"
+                                                                                : "secondary-button"
+                                                                        }
+                                                                        onClick={() =>
+                                                                            setAssignmentMode(
+                                                                                "lector"
+                                                                            )
+                                                                        }
+                                                                        disabled={
+                                                                            working
+                                                                        }
+                                                                    >
+                                                                        <UsersRound
+                                                                            size={16}
+                                                                        />
+                                                                        Assign Lector
+                                                                    </button>
+
+                                                                    <button
+                                                                        type="button"
+                                                                        className={
+                                                                            assignmentMode ===
+                                                                                "text"
+                                                                                ? "primary-button"
+                                                                                : "secondary-button"
+                                                                        }
+                                                                        onClick={() =>
+                                                                            setAssignmentMode(
+                                                                                "text"
+                                                                            )
+                                                                        }
+                                                                        disabled={
+                                                                            working
+                                                                        }
+                                                                    >
+                                                                        <Pencil
+                                                                            size={16}
+                                                                        />
+                                                                        Custom Text
+                                                                    </button>
+                                                                </div>
+
+                                                                {assignmentMode ===
+                                                                    "lector" ? (
+                                                                    <>
+                                                                        <label>
+                                                                            Select an
+                                                                            active
+                                                                            lector
+                                                                        </label>
+
+                                                                        <select
+                                                                            className="form-select"
+                                                                            value={
+                                                                                manualLectorId
+                                                                            }
+                                                                            onChange={(
+                                                                                e
+                                                                            ) =>
+                                                                                setManualLectorId(
+                                                                                    e
+                                                                                        .target
+                                                                                        .value
+                                                                                )
+                                                                            }
+                                                                        >
+                                                                            <option value="">
+                                                                                Choose a
+                                                                                lector
+                                                                            </option>
+
+                                                                            {activeLectors.map(
+                                                                                (
+                                                                                    lector
+                                                                                ) => (
+                                                                                    <option
+                                                                                        key={
+                                                                                            lector.id
+                                                                                        }
+                                                                                        value={
+                                                                                            lector.id
+                                                                                        }
+                                                                                    >
+                                                                                        {getLectorName(
+                                                                                            lector,
+                                                                                            lector.id
+                                                                                        )}
+                                                                                    </option>
+                                                                                )
+                                                                            )}
+                                                                        </select>
+
+                                                                        <p className="field-hint">
+                                                                            Hard
+                                                                            scheduling
+                                                                            conflicts,
+                                                                            such as
+                                                                            consecutive
+                                                                            serving
+                                                                            days, are
+                                                                            still
+                                                                            checked by
+                                                                            the
+                                                                            backend.
+                                                                        </p>
+
+                                                                        <div className="schedule-actions">
+                                                                            <button
+                                                                                type="button"
+                                                                                className="primary-button"
+                                                                                disabled={
+                                                                                    working ||
+                                                                                    !manualLectorId
+                                                                                }
+                                                                                onClick={() =>
+                                                                                    saveManualAssignment(
+                                                                                        item.id
+                                                                                    )
+                                                                                }
+                                                                            >
+                                                                                Save
+                                                                                Assignment
+                                                                            </button>
+                                                                        </div>
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <label>
+                                                                            Enter Custom
+                                                                            Text
+                                                                        </label>
+
+                                                                        <input
+                                                                            type="text"
+                                                                            className="form-select"
+                                                                            value={
+                                                                                specialText
+                                                                            }
+                                                                            onChange={(
+                                                                                e
+                                                                            ) =>
+                                                                                setSpecialText(
+                                                                                    e
+                                                                                        .target
+                                                                                        .value
+                                                                                )
+                                                                            }
+                                                                            maxLength={
+                                                                                100
+                                                                            }
+                                                                            placeholder="e.g. Zone 1, Sunday School, Youth Group"
+                                                                            disabled={
+                                                                                working
+                                                                            }
+                                                                        />
+
+                                                                        <p className="field-hint">
+                                                                            Custom text
+                                                                            replaces
+                                                                            the lector
+                                                                            name in this
+                                                                            existing
+                                                                            position.
+                                                                            Maximum 100
+                                                                            characters.
+                                                                        </p>
+
+                                                                        <div className="schedule-actions">
+                                                                            <button
+                                                                                type="button"
+                                                                                className="primary-button"
+                                                                                disabled={
+                                                                                    working ||
+                                                                                    !specialText.trim()
+                                                                                }
+                                                                                onClick={() =>
+                                                                                    saveSpecialText(
+                                                                                        item.id
+                                                                                    )
+                                                                                }
+                                                                            >
+                                                                                Save
+                                                                                Custom
+                                                                                Text
+                                                                            </button>
+
+                                                                            <button
+                                                                                type="button"
+                                                                                className="secondary-button"
+                                                                                disabled={
+                                                                                    working ||
+                                                                                    !item.special_text
+                                                                                }
+                                                                                onClick={() =>
+                                                                                    saveSpecialText(
+                                                                                        item.id,
+                                                                                        ""
+                                                                                    )
+                                                                                }
+                                                                            >
+                                                                                Clear
+                                                                                Custom
+                                                                                Text
+                                                                            </button>
+                                                                        </div>
+                                                                    </>
+                                                                )}
+
+                                                                <div className="schedule-actions">
+                                                                    <button
+                                                                        type="button"
+                                                                        className="secondary-button"
+                                                                        disabled={
+                                                                            working
+                                                                        }
+                                                                        onClick={
+                                                                            cancelEditing
+                                                                        }
+                                                                    >
+                                                                        Cancel
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            </section>
+                        </div>
+                        </div>,
+                        document.body
+                    )}
                 </>
             )}
         </div>

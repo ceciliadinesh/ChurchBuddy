@@ -37,7 +37,8 @@
 
 .monthly-scheduling button,
 .monthly-scheduling input,
-.monthly-scheduling select {
+.monthly-scheduling select,
+.monthly-scheduling textarea {
     font: inherit;
 }
 
@@ -214,7 +215,8 @@
 
 .monthly-scheduling button:focus-visible,
 .monthly-scheduling select:focus-visible,
-.monthly-scheduling input:focus-visible {
+.monthly-scheduling input:focus-visible,
+.monthly-scheduling textarea:focus-visible {
     outline: 3px solid rgba(177, 123, 138, 0.3);
     outline-offset: 2px;
 }
@@ -239,15 +241,22 @@
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.monthly-scheduling textarea.form-select {
+    resize: vertical;
+    line-height: 1.5;
+}
+
 .monthly-scheduling .form-select:focus,
-.monthly-scheduling input:focus {
+.monthly-scheduling input:focus,
+.monthly-scheduling textarea:focus {
     border-color: #c7aab4;
     outline: none;
     box-shadow: 0 0 0 3px rgba(177, 123, 138, 0.1);
 }
 
 .monthly-scheduling .form-select:disabled,
-.monthly-scheduling input:disabled {
+.monthly-scheduling input:disabled,
+.monthly-scheduling textarea:disabled {
     cursor: not-allowed;
     opacity: 0.6;
 }
@@ -737,6 +746,100 @@
     max-width: 440px;
 }
 
+.monthly-scheduling .manual-editor textarea.form-select {
+    max-width: 100%;
+}
+
+/* =========================================================
+   DAY POPUP (MODAL)
+========================================================= */
+
+.monthly-scheduling .day-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(81, 66, 72, 0.45);
+    backdrop-filter: blur(2px);
+    animation: ms-fade-in 0.15s ease;
+}
+
+.monthly-scheduling .day-modal {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 540px;
+    max-height: 78vh;
+    background: var(--ms-surface);
+    border: 1px solid var(--ms-border);
+    border-radius: 17px;
+    box-shadow: 0 20px 60px rgba(81, 66, 72, 0.25);
+    overflow: hidden;
+    animation: ms-pop-in 0.18s ease;
+}
+
+.monthly-scheduling .day-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 23px;
+    background: var(--ms-surface);
+    border-bottom: 1px solid var(--ms-border);
+    flex-shrink: 0;
+}
+
+.monthly-scheduling .day-modal-header h2 {
+    margin: 0;
+    color: var(--ms-text);
+    font-size: 1.08rem;
+    font-weight: 750;
+    line-height: 1.4;
+}
+
+.monthly-scheduling .day-modal-header p {
+    margin: 5px 0 0;
+    color: var(--ms-muted);
+    font-size: 0.84rem;
+    line-height: 1.55;
+}
+
+.monthly-scheduling .day-modal-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 20px 23px 23px;
+    overflow-y: auto;
+}
+
+.monthly-scheduling .day-modal-body .empty-state,
+.monthly-scheduling .day-modal-body .notice-error,
+.monthly-scheduling .day-modal-body .notice-success {
+    margin: 0;
+}
+
+@keyframes ms-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes ms-pop-in {
+    from { opacity: 0; transform: translateY(10px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .monthly-scheduling .day-modal-overlay,
+    .monthly-scheduling .day-modal {
+        animation: none;
+    }
+}
+
 /* =========================================================
    DOWNLOAD ROSTER
 ========================================================= */
@@ -907,6 +1010,24 @@
 
     .monthly-scheduling .calendar-assignment-actions > button {
         flex: 1 1 auto;
+    }
+
+    /* Popup becomes a bottom sheet on phones */
+    .monthly-scheduling .day-modal-overlay {
+        align-items: flex-end;
+        padding: 0;
+    }
+
+    .monthly-scheduling .day-modal {
+        max-width: 100%;
+        max-height: 92vh;
+        border-radius: 17px 17px 0 0;
+    }
+
+    .monthly-scheduling .day-modal-header,
+    .monthly-scheduling .day-modal-body {
+        padding-left: 16px;
+        padding-right: 16px;
     }
 }
 
