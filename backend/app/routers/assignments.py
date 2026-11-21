@@ -36,6 +36,9 @@ SUNDAY_FROZEN_TIMES = {
     time(9, 45),
 }
 
+# Soft monthly limit per lector. Auto-assign fills positions up to this
+# limit first, then gives extra assignments only for positions that
+# would otherwise stay unfilled.
 MAX_ASSIGNMENTS_PER_MONTH = 5
 
 
@@ -800,6 +803,18 @@ def auto_assign_lectors(
     monthly_form_id: int,
     db: Session = Depends(get_db)
 ):
+    """
+    Two-pass automatic assignment.
+
+    Pass 1: fill positions chronologically, with every lector
+            limited to MAX_ASSIGNMENTS_PER_MONTH.
+    Pass 2: positions still unfilled are retried with the monthly
+            limit removed. Lectors with the fewest assignments are
+            chosen first so the extra work is spread evenly.
+
+    Availability preferences, one Mass per day and the rest-day rule
+    apply in both passes.
+    """
 
     monthly_form = ensure_monthly_form_exists(
         db,
@@ -907,11 +922,15 @@ def auto_assign_lectors(
     pool_size = len(eligible_pool)
 
     assigned_count = 0
+    overflow_assigned_count = 0
     protected_count = 0
     frozen_date_skipped_count = 0
     sunday_frozen_skipped_count = 0
     already_filled_count = 0
     unfilled_count = 0
+
+    # Positions that could not be filled in pass 1.
+    pending_unfilled = []
 
     try:
 
@@ -968,7 +987,101 @@ def auto_assign_lectors(
             )
         )
 
-        # Assign positions chronologically.
+        # ----------------------------------------------
+        # Helpers used by both passes
+        # ----------------------------------------------
+
+        def find_best_lector(assignment, mass_slot, enforce_cap):
+            candidates = []
+
+            for lector in eligible_pool:
+
+                # Monthly cap (pass 1 only).
+
+                if (
+                    enforce_cap
+                    and assignment_counts[lector.id]
+                    >= MAX_ASSIGNMENTS_PER_MONTH
+                ):
+                    continue
+
+                submission = submission_map[lector.id]
+
+                # Availability preferences.
+
+                if not lector_meets_availability(
+                    db,
+                    submission,
+                    assignment,
+                    mass_slot
+                ):
+                    continue
+
+                # Enforce one Mass per day and one full rest day.
+
+                if find_lector_assignment_conflict(
+                    db,
+                    lector.id,
+                    assignment
+                ):
+                    continue
+
+                candidates.append(lector)
+
+            if not candidates:
+                return None
+
+            # Fair workload selection:
+            # 1. Fewest total assignments.
+            # 2. Fewest assignments of this responsibility.
+            # 3. Rotating tie-break.
+
+            responsibility = assignment.responsibility
+
+            cursor = rotation_cursor.get(
+                responsibility,
+                0
+            )
+
+            candidates.sort(
+                key=lambda lector: (
+                    assignment_counts[lector.id],
+                    responsibility_counts[lector.id].get(
+                        responsibility,
+                        0
+                    ),
+                    (
+                        lector_positions[lector.id] - cursor
+                    ) % pool_size
+                )
+            )
+
+            return candidates[0]
+
+        def save_assignment(assignment, lector):
+            responsibility = assignment.responsibility
+
+            assignment.lector_id = lector.id
+            assignment.is_manual = False
+            assignment.is_protected = False
+
+            # Flush so subsequent conflict checks see this assignment.
+
+            db.flush()
+
+            assignment_counts[lector.id] += 1
+
+            responsibility_counts[
+                lector.id
+            ][responsibility] += 1
+
+            rotation_cursor[responsibility] = (
+                lector_positions[lector.id] + 1
+            ) % pool_size
+
+        # ----------------------------------------------
+        # PASS 1: assign chronologically within the cap
+        # ----------------------------------------------
 
         for assignment in assignments:
 
@@ -1012,97 +1125,39 @@ def auto_assign_lectors(
                 already_filled_count += 1
                 continue
 
-            eligible_lectors = []
+            selected_lector = find_best_lector(
+                assignment,
+                mass_slot,
+                enforce_cap=True
+            )
 
-            # Check each monthly eligible lector.
+            if selected_lector is None:
+                # Retry in pass 2 with the monthly cap removed.
+                pending_unfilled.append((assignment, mass_slot))
+                continue
 
-            for lector in eligible_pool:
+            save_assignment(assignment, selected_lector)
+            assigned_count += 1
 
-                # Monthly cap.
+        # ----------------------------------------------
+        # PASS 2: fill the remaining positions, ignoring the cap
+        # ----------------------------------------------
 
-                if (
-                    assignment_counts[lector.id]
-                    >= MAX_ASSIGNMENTS_PER_MONTH
-                ):
-                    continue
+        for assignment, mass_slot in pending_unfilled:
 
-                submission = submission_map[lector.id]
+            selected_lector = find_best_lector(
+                assignment,
+                mass_slot,
+                enforce_cap=False
+            )
 
-                # Availability preferences.
-
-                if not lector_meets_availability(
-                    db,
-                    submission,
-                    assignment,
-                    mass_slot
-                ):
-                    continue
-
-                # Enforce one Mass per day and one full rest day.
-
-                conflict = find_lector_assignment_conflict(
-                    db,
-                    lector.id,
-                    assignment
-                )
-
-                if conflict:
-                    continue
-
-                eligible_lectors.append(lector)
-
-            if not eligible_lectors:
+            if selected_lector is None:
                 unfilled_count += 1
                 continue
 
-            # Fair workload selection:
-            # 1. Fewest total assignments.
-            # 2. Fewest assignments of this responsibility.
-            # 3. Rotating tie-break.
-
-            responsibility = assignment.responsibility
-
-            cursor = rotation_cursor.get(
-                responsibility,
-                0
-            )
-
-            eligible_lectors.sort(
-                key=lambda lector: (
-                    assignment_counts[lector.id],
-                    responsibility_counts[lector.id].get(
-                        responsibility,
-                        0
-                    ),
-                    (
-                        lector_positions[lector.id] - cursor
-                    ) % pool_size
-                )
-            )
-
-            selected_lector = eligible_lectors[0]
-
-            # Save assignment.
-
-            assignment.lector_id = selected_lector.id
-            assignment.is_manual = False
-            assignment.is_protected = False
-
-            # Flush so subsequent conflict checks see this assignment.
-
-            db.flush()
-
-            assignment_counts[selected_lector.id] += 1
-
-            responsibility_counts[
-                selected_lector.id
-            ][responsibility] += 1
-
-            rotation_cursor[responsibility] = (
-                lector_positions[selected_lector.id] + 1
-            ) % pool_size
-
+            save_assignment(assignment, selected_lector)
             assigned_count += 1
+            overflow_assigned_count += 1
 
         db.commit()
 
@@ -1132,6 +1187,7 @@ def auto_assign_lectors(
         "eligible_lectors": len(eligible_pool),
         "max_assignments_per_lector": MAX_ASSIGNMENTS_PER_MONTH,
         "assignments_created": assigned_count,
+        "overflow_assignments_created": overflow_assigned_count,
         "frozen_date_positions_skipped": frozen_date_skipped_count,
         "sunday_frozen_slots_skipped": sunday_frozen_skipped_count,
         "frozen_positions_skipped": (

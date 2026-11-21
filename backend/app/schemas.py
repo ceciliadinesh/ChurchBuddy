@@ -5,21 +5,24 @@ from typing import Literal
 from pydantic import (
     BaseModel,
     ConfigDict,
-    EmailStr,
     Field,
     model_validator,
 )
+
+
+# --------------------------------------------------
+# LECTOR SCHEMAS
+# --------------------------------------------------
+
 class LectorCreate(BaseModel):
     first_name: str
     last_name: str
-    email: EmailStr | None = None
     phone: str | None = None
 
 
 class LectorUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
-    email: EmailStr | None = None
     phone: str | None = None
     is_active: bool | None = None
 
@@ -28,7 +31,6 @@ class LectorResponse(BaseModel):
     id: int
     first_name: str
     last_name: str
-    email: EmailStr | None
     phone: str | None
     is_active: bool
     created_at: datetime
@@ -36,10 +38,10 @@ class LectorResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-from typing import Literal
+# --------------------------------------------------
+# UNAVAILABLE DATE SCHEMAS
+# --------------------------------------------------
 
-
-# Unavailable date range
 class UnavailableDateCreate(BaseModel):
     start_date: date
     end_date: date
@@ -52,7 +54,10 @@ class UnavailableDateCreate(BaseModel):
         return self
 
 
-# Monthly availability submission
+# --------------------------------------------------
+# MONTHLY AVAILABILITY SCHEMAS
+# --------------------------------------------------
+
 class AvailabilitySubmissionCreate(BaseModel):
     lector_id: int
     monthly_form_id: int
@@ -98,12 +103,18 @@ class AvailabilitySubmissionCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_available_days(self):
-        if self.day_availability == "specific_days" and not self.available_days:
+        if (
+            self.day_availability == "specific_days"
+            and not self.available_days
+        ):
             raise ValueError(
                 "Please select at least one available day."
             )
 
-        if self.day_availability != "specific_days" and self.available_days:
+        if (
+            self.day_availability != "specific_days"
+            and self.available_days
+        ):
             raise ValueError(
                 "Select specific days only when using specific_days availability."
             )
@@ -111,9 +122,9 @@ class AvailabilitySubmissionCreate(BaseModel):
         return self
 
 
-from datetime import date
-from pydantic import model_validator
-
+# --------------------------------------------------
+# MONTHLY FORM SCHEMAS
+# --------------------------------------------------
 
 class MonthlyFormCreate(BaseModel):
     month: int = Field(ge=1, le=12)
@@ -130,10 +141,11 @@ class MonthlyFormCreate(BaseModel):
             and self.closing_date is not None
             and self.closing_date < self.opening_date
         ):
-            raise ValueError("Closing date cannot be before opening date.")
+            raise ValueError(
+                "Closing date cannot be before opening date."
+            )
 
         return self
-
 
 
 class MonthlyFormResponse(BaseModel):
@@ -150,4 +162,3 @@ class MonthlyFormResponse(BaseModel):
     google_form_edit_url: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
-

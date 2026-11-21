@@ -16,6 +16,7 @@ import {
     CheckCircle2,
     CircleAlert,
     Copy,
+    Image as ImageIcon,
 } from "lucide-react";
 import "./MonthlyScheduling.css";
 
@@ -27,6 +28,19 @@ const RESPONSIBILITY_ORDER = { Angelus: 1, Reading: 2, POF: 3 };
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 const SUNDAY_SPECIAL_TIMES = ["7:30 AM", "9:45 AM"];
+
+// Times that can be frozen: Mon-Sat vs Sunday
+const WEEKDAY_FREEZE_TIMES = ["7:00 AM", "6:00 PM"];
+const SUNDAY_FREEZE_TIMES = ["7:30 AM", "9:45 AM", "6:00 PM"];
+
+function getFreezeTimesForDate(dateStr) {
+    if (!dateStr) return WEEKDAY_FREEZE_TIMES;
+
+    const date = new Date(`${dateStr}T12:00:00`);
+    if (Number.isNaN(date.getTime())) return WEEKDAY_FREEZE_TIMES;
+
+    return date.getDay() === 0 ? SUNDAY_FREEZE_TIMES : WEEKDAY_FREEZE_TIMES;
+}
 
 // --------------------------------------------------
 // GENERAL HELPERS
@@ -261,6 +275,17 @@ function buildRosterGroups(assignments, sundaySlots = [], frozenDates = []) {
         const date = getDateOnly(item.assignment_date || item.date);
         if (!date) return;
 
+        // Frozen times show notes only, so skip their positions
+        if (
+            isSlotFrozen(
+                frozenDates,
+                date,
+                formatMassTime(getMassTime(item))
+            )
+        ) {
+            return;
+        }
+
         if (!byDate.has(date)) byDate.set(date, []);
         byDate.get(date).push(item);
     });
@@ -425,9 +450,21 @@ function buildRosterDocument(
             })} ${form.year}`
             : "MONTH YEAR");
 
+    // Size rows so the whole month fits on 2 A4 portrait pages.
+    // Usable height per page is 277mm (297mm minus 10mm margins).
+    const totalRows =
+        groups.reduce((sum, group) => sum + group.rows.length, 0) || 1;
+
+    const usableMm = 2 * 277 - 10 - 2 * 7 - 14; // title, headers, safety
+    const rowMm = Math.max(
+        4.2,
+        Math.min(8, Math.floor((usableMm / totalRows) * 10) / 10)
+    );
+    const fontPx = rowMm >= 6.5 ? 11 : rowMm >= 5.5 ? 9.5 : 8.5;
+
     const bodyRows = groups
-        .map((group) =>
-            group.rows
+        .map((group) => {
+            const groupHtml = group.rows
                 .map((row, index) => {
                     const dateCells =
                         index === 0
@@ -479,8 +516,10 @@ function buildRosterDocument(
                             </tr>
                         `;
                 })
-                .join("")
-        )
+                .join("");
+
+            return `<tbody class="date-group">${groupHtml}</tbody>`;
+        })
         .join("");
 
     return `<!doctype html>
@@ -489,8 +528,12 @@ function buildRosterDocument(
 <meta charset="utf-8">
 <title>Lectors List - ${escapeHtml(monthYear)}</title>
 <style>
-  @page { size: A4 landscape; margin: 10mm; }
-  * { box-sizing: border-box; }
+  @page { size: 210mm 297mm; margin: 10mm; }
+  * {
+    box-sizing: border-box;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
   body {
     margin: 0;
     padding: 18px;
@@ -499,22 +542,23 @@ function buildRosterDocument(
     font-family: Arial, Helvetica, sans-serif;
   }
   h1 {
-    margin: 0 0 18px;
+    margin: 0 0 3mm;
     text-align: center;
-    font-size: 21px;
+    font-size: 18px;
     font-weight: 700;
   }
   table {
     width: 100%;
     border-collapse: collapse;
     table-layout: fixed;
-    font-size: 12px;
+    font-size: ${fontPx}px;
     background: #fff;
   }
   th, td {
     border: 1px solid #222;
-    padding: 5px 6px;
-    height: 27px;
+    padding: 0.6mm 1.2mm;
+    height: ${rowMm}mm;
+    line-height: 1.15;
     vertical-align: middle;
   }
   th {
@@ -556,7 +600,7 @@ function buildRosterDocument(
   @media print {
     body { padding: 0; }
     thead { display: table-header-group; }
-    tr { page-break-inside: avoid; }
+    tbody.date-group { break-inside: avoid; page-break-inside: avoid; }
   }
 </style>
 </head>
@@ -571,10 +615,167 @@ function buildRosterDocument(
       ${ROSTER_SLOTS.map((slot) => `<th>${slot}</th>`).join("")}
     </tr>
   </thead>
-  <tbody>${bodyRows}</tbody>
+  ${bodyRows}
 </table>
 </body>
 </html>`;
+}
+
+// --------------------------------------------------
+// DOWNLOAD AS JPG (A4 PORTRAIT, UP TO 2 PAGES)
+// --------------------------------------------------
+
+// Renders the roster HTML to JPG pages without any extra library:
+// HTML -> SVG foreignObject -> canvas -> JPEG blobs.
+// A date's rows are never split across pages, and page 2 repeats
+// the table header.
+async function renderRosterJpgPages(html) {
+    const WIDTH = 794; // A4 portrait at 96dpi
+    const PAGE_HEIGHT = 1123;
+    const MARGIN = 18;
+    const SCALE = 2; // sharper text
+
+    const frame = document.createElement("iframe");
+    frame.setAttribute("aria-hidden", "true");
+    frame.style.cssText = `position:fixed;left:-10000px;top:0;width:${WIDTH}px;height:10px;border:0;`;
+    document.body.appendChild(frame);
+
+    try {
+        const doc = frame.contentWindow.document;
+        doc.open();
+        doc.write(html);
+        doc.close();
+
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        const height = Math.ceil(doc.documentElement.scrollHeight);
+
+        // Measure the table header and every date group
+        const headRect = doc.querySelector("thead").getBoundingClientRect();
+        const headTop = Math.floor(headRect.top);
+        const headBottom = Math.ceil(headRect.bottom);
+
+        const groupBottoms = [
+            ...doc.querySelectorAll("tbody.date-group"),
+        ].map((el) => Math.ceil(el.getBoundingClientRect().bottom));
+
+        const styles = [...doc.querySelectorAll("style")]
+            .map((el) => el.textContent)
+            .join("\n");
+
+        const serializer = new XMLSerializer();
+        const inner = [...doc.body.childNodes]
+            .map((node) => serializer.serializeToString(node))
+            .join("");
+
+        const xhtml =
+            `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${WIDTH}px;` +
+            `padding:${MARGIN}px;background:#fff;color:#111;box-sizing:border-box;` +
+            `font-family:Arial,Helvetica,sans-serif;">` +
+            `<style>${styles}</style>${inner}</div>`;
+
+        const svg =
+            `<svg xmlns="http://www.w3.org/2000/svg" ` +
+            `width="${WIDTH * SCALE}" height="${height * SCALE}" ` +
+            `viewBox="0 0 ${WIDTH} ${height}">` +
+            `<foreignObject width="100%" height="100%">${xhtml}</foreignObject>` +
+            `</svg>`;
+
+        const image = new Image();
+
+        await new Promise((resolve, reject) => {
+            image.onload = resolve;
+            image.onerror = () =>
+                reject(new Error("Could not render the roster image."));
+            image.src =
+                "data:image/svg+xml;charset=utf-8," +
+                encodeURIComponent(svg);
+        });
+
+        const toBlob = (canvas) =>
+            new Promise((resolve, reject) => {
+                canvas.toBlob(
+                    (blob) =>
+                        blob
+                            ? resolve(blob)
+                            : reject(new Error("Could not create the JPG.")),
+                    "image/jpeg",
+                    0.95
+                );
+            });
+
+        const makePage = (pageHeight, draw) => {
+            const canvas = document.createElement("canvas");
+            canvas.width = WIDTH * SCALE;
+            canvas.height = pageHeight * SCALE;
+
+            const ctx = canvas.getContext("2d");
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            draw(ctx);
+            return canvas;
+        };
+
+        // Copy a vertical slice of the full image onto a page
+        const drawSlice = (ctx, srcTop, srcBottom, destTop) => {
+            ctx.drawImage(
+                image,
+                0,
+                srcTop * SCALE,
+                WIDTH * SCALE,
+                (srcBottom - srcTop) * SCALE,
+                0,
+                destTop * SCALE,
+                WIDTH * SCALE,
+                (srcBottom - srcTop) * SCALE
+            );
+        };
+
+        // Everything fits on one page
+        if (height <= PAGE_HEIGHT) {
+            const page = makePage(PAGE_HEIGHT, (ctx) =>
+                drawSlice(ctx, 0, height, 0)
+            );
+
+            return [await toBlob(page)];
+        }
+
+        // Page 1 ends at the last date group that still fits
+        const limit = PAGE_HEIGHT - MARGIN;
+        let splitY = height;
+
+        for (const bottom of groupBottoms) {
+            if (bottom <= limit) {
+                splitY = bottom;
+            } else {
+                break;
+            }
+        }
+
+        if (splitY >= height) splitY = limit;
+
+        const page1 = makePage(PAGE_HEIGHT, (ctx) =>
+            drawSlice(ctx, 0, splitY, 0)
+        );
+
+        // Page 2: repeated table header, then the remaining dates
+        const headerHeight = headBottom - headTop;
+        const remaining = height - splitY;
+        const page2Height = Math.max(
+            PAGE_HEIGHT,
+            MARGIN + headerHeight + remaining
+        );
+
+        const page2 = makePage(page2Height, (ctx) => {
+            drawSlice(ctx, headTop, headBottom, MARGIN);
+            drawSlice(ctx, splitY, height, MARGIN + headerHeight);
+        });
+
+        return [await toBlob(page1), await toBlob(page2)];
+    } finally {
+        frame.remove();
+    }
 }
 
 // --------------------------------------------------
@@ -676,8 +877,6 @@ export default function MonthlyScheduling() {
     const [editingAssignmentId, setEditingAssignmentId] = useState(null);
     const [manualLectorId, setManualLectorId] = useState("");
     const [overrideAvailability, setOverrideAvailability] = useState(false);
-    const [assignmentMode, setAssignmentMode] = useState("lector");
-    const [specialText, setSpecialText] = useState("");
 
     // Frozen dates (add form)
     const [frozenDates, setFrozenDates] = useState([]);
@@ -1009,8 +1208,6 @@ export default function MonthlyScheduling() {
         setEditingAssignmentId(null);
         setManualLectorId("");
         setOverrideAvailability(false);
-        setAssignmentMode("lector");
-        setSpecialText("");
     }
 
     // Close the day popup and reset every editor inside it
@@ -1273,6 +1470,20 @@ export default function MonthlyScheduling() {
         [selectedDay, frozenDates]
     );
 
+    // Positions in a frozen time are hidden: frozen times show notes only
+    const selectedDayOpenItems = useMemo(
+        () =>
+            selectedDayItems.filter(
+                (item) =>
+                    !isSlotFrozen(
+                        frozenDates,
+                        selectedDay,
+                        formatMassTime(getMassTime(item))
+                    )
+            ),
+        [selectedDayItems, frozenDates, selectedDay]
+    );
+
     // ---------------- CLOSE / REOPEN ----------------
 
     async function toggleForm(action) {
@@ -1330,6 +1541,11 @@ export default function MonthlyScheduling() {
             date.getFullYear() !== Number(selectedForm.year)
         ) {
             setError("Choose a date within the selected monthly form.");
+            return;
+        }
+
+        if (!getFreezeTimesForDate(dateInput).includes(freezeTimeInput)) {
+            setError("That time is not available for the selected day.");
             return;
         }
 
@@ -1494,8 +1710,6 @@ export default function MonthlyScheduling() {
 
         setEditingAssignmentId(item.id);
         setManualLectorId(item.lector_id != null ? String(item.lector_id) : "");
-        setSpecialText(item.special_text || "");
-        setAssignmentMode(item.special_text ? "text" : "lector");
         setOverrideAvailability(false);
         setError("");
         setMessage("");
@@ -1567,71 +1781,6 @@ export default function MonthlyScheduling() {
         }
     }
 
-    async function saveSpecialText(assignmentId, textValue = specialText) {
-        if (textValue.length > 100) {
-            setError("Custom text cannot exceed 100 characters.");
-            return;
-        }
-
-        setWorking(true);
-        setError("");
-        setMessage("");
-
-        try {
-            const result = await request(
-                `/assignments/${assignmentId}/special-text`,
-                {
-                    method: "PATCH",
-                    body: JSON.stringify({
-                        special_text: textValue.trim() || null,
-                    }),
-                }
-            );
-
-            cancelEditing();
-            await loadAssignments(selectedId);
-
-            setMessage(result.message || "Custom text saved successfully.");
-        } catch (err) {
-            setError(err.message || "Could not save custom text.");
-        } finally {
-            setWorking(false);
-        }
-    }
-
-    async function clearManualAssignment(assignmentId) {
-        if (
-            !window.confirm(
-                "This will permanently remove this position from the calendar. Continue?"
-            )
-        ) {
-            return;
-        }
-
-        setWorking(true);
-        setError("");
-        setMessage("");
-
-        try {
-            const result = await request(
-                `/assignments/${assignmentId}/manual`,
-                { method: "DELETE" }
-            );
-
-            cancelEditing();
-            await loadAssignments(selectedId);
-
-            setMessage(
-                result.message ||
-                "Assignment position removed from the calendar."
-            );
-        } catch (err) {
-            setError(err.message);
-        } finally {
-            setWorking(false);
-        }
-    }
-
     // ---------------- DOWNLOADS ----------------
 
     function downloadRoster(format) {
@@ -1655,6 +1804,36 @@ export default function MonthlyScheduling() {
             .trim()
             .replace(/[^a-z0-9-_]+/gi, "-");
 
+        if (format === "jpg") {
+            renderRosterJpgPages(html)
+                .then((blobs) => {
+                    blobs.forEach((blob, index) => {
+                        // Small delay so the browser accepts both downloads
+                        setTimeout(() => {
+                            const url = URL.createObjectURL(blob);
+                            const link = document.createElement("a");
+
+                            link.href = url;
+                            link.download =
+                                blobs.length > 1
+                                    ? `Lectors-List-${safeName}-page-${index + 1}.jpg`
+                                    : `Lectors-List-${safeName}.jpg`;
+
+                            document.body.appendChild(link);
+                            link.click();
+                            link.remove();
+
+                            setTimeout(() => URL.revokeObjectURL(url), 10000);
+                        }, index * 500);
+                    });
+                })
+                .catch((err) => {
+                    setError(err.message || "Could not create the JPG.");
+                });
+
+            return;
+        }
+
         if (format === "word") {
             const blob = new Blob(["\ufeff", html], {
                 type: "application/msword;charset=utf-8",
@@ -1674,21 +1853,35 @@ export default function MonthlyScheduling() {
             return;
         }
 
-        const printWindow = window.open("", "_blank");
+        // Print from a hidden iframe: no pop-up blocker, and the roster
+        // is fully rendered before the print dialog opens.
+        const frame = document.createElement("iframe");
 
-        if (!printWindow) {
-            setError("Allow pop-ups for this site to create the PDF.");
-            return;
-        }
+        frame.setAttribute("aria-hidden", "true");
+        frame.style.position = "fixed";
+        frame.style.right = "0";
+        frame.style.bottom = "0";
+        frame.style.width = "0";
+        frame.style.height = "0";
+        frame.style.border = "0";
 
-        printWindow.document.open();
-        printWindow.document.write(html);
-        printWindow.document.close();
+        document.body.appendChild(frame);
 
-        printWindow.onload = () => {
-            printWindow.focus();
-            printWindow.print();
-        };
+        const frameDoc = frame.contentWindow.document;
+        frameDoc.open();
+        frameDoc.write(html);
+        frameDoc.close();
+
+        setTimeout(() => {
+            try {
+                frame.contentWindow.focus();
+                frame.contentWindow.print();
+            } catch {
+                setError("Could not open the print dialog.");
+            }
+
+            setTimeout(() => frame.remove(), 60000);
+        }, 400);
     }
 
     // --------------------------------------------------
@@ -1880,8 +2073,8 @@ export default function MonthlyScheduling() {
                         <div>
                             <h2>Step 1 · Frozen Dates</h2>
                             <p>
-                                Auto-assign skips these dates and times. You
-                                can still assign them manually.
+                                Auto-assign skips these dates and times, and
+                                they show notes only.
                             </p>
                         </div>
 
@@ -1900,7 +2093,16 @@ export default function MonthlyScheduling() {
                                 type="date"
                                 className="form-select"
                                 value={dateInput}
-                                onChange={(e) => setDateInput(e.target.value)}
+                                onChange={(e) => {
+                                    const value = e.target.value;
+                                    setDateInput(value);
+
+                                    // Keep the time valid for Mon-Sat vs Sunday
+                                    const allowed = getFreezeTimesForDate(value);
+                                    if (!allowed.includes(freezeTimeInput)) {
+                                        setFreezeTimeInput(allowed[0]);
+                                    }
+                                }}
                                 disabled={working}
                             />
 
@@ -1912,7 +2114,7 @@ export default function MonthlyScheduling() {
                                 }
                                 disabled={working}
                             >
-                                {ROSTER_SLOTS.map((time) => (
+                                {getFreezeTimesForDate(dateInput).map((time) => (
                                     <option key={time} value={time}>
                                         {time}
                                     </option>
@@ -2375,6 +2577,16 @@ export default function MonthlyScheduling() {
                                 <Download size={17} />
                                 Download Word
                             </button>
+
+                            <button
+                                type="button"
+                                className="secondary-button"
+                                onClick={() => downloadRoster("jpg")}
+                                disabled={assignments.length === 0}
+                            >
+                                <ImageIcon size={17} />
+                                Download JPG
+                            </button>
                         </div>
 
                         <p className="field-hint">
@@ -2622,7 +2834,14 @@ export default function MonthlyScheduling() {
                                                         }
                                                         disabled={working}
                                                     >
-                                                        {ROSTER_SLOTS.map((time) => (
+                                                        {[
+                                                            ...new Set([
+                                                                ...getFreezeTimesForDate(
+                                                                    selectedDay
+                                                                ),
+                                                                frozenTimeDraft,
+                                                            ]),
+                                                        ].map((time) => (
                                                             <option
                                                                 key={time}
                                                                 value={time}
@@ -2734,15 +2953,17 @@ export default function MonthlyScheduling() {
                                         </div>
                                     ))}
 
-                                    {/* NORMAL ASSIGNMENT POSITIONS */}
-                                    {selectedDayItems.length === 0 ? (
-                                        <p className="empty-state">
-                                            No normal assignment positions on this
-                                            date.
-                                        </p>
+                                    {/* NORMAL ASSIGNMENT POSITIONS (frozen times are hidden) */}
+                                    {selectedDayOpenItems.length === 0 ? (
+                                        selectedFrozenDates.length === 0 && (
+                                            <p className="empty-state">
+                                                No normal assignment positions on
+                                                this date.
+                                            </p>
+                                        )
                                     ) : (
                                         <div className="calendar-mass-list">
-                                            {selectedDayItems.map((item) => {
+                                            {selectedDayOpenItems.map((item) => {
                                                 const isEditing =
                                                     editingAssignmentId === item.id;
 
@@ -2750,12 +2971,6 @@ export default function MonthlyScheduling() {
 
                                                 const itemTime = formatMassTime(
                                                     getMassTime(item)
-                                                );
-
-                                                const itemFrozen = isSlotFrozen(
-                                                    frozenDates,
-                                                    selectedDay,
-                                                    itemTime
                                                 );
 
                                                 const hasValue =
@@ -2827,12 +3042,6 @@ export default function MonthlyScheduling() {
                                                         </div>
 
                                                         <div className="calendar-assignment-actions">
-                                                            {itemFrozen && (
-                                                                <span className="field-hint">
-                                                                    Frozen time
-                                                                </span>
-                                                            )}
-
                                                             {item.is_manual && (
                                                                 <span className="field-hint">
                                                                     Manual
@@ -2859,21 +3068,6 @@ export default function MonthlyScheduling() {
                                                                 Edit
                                                             </button>
 
-                                                            <button
-                                                                type="button"
-                                                                className="secondary-button"
-                                                                disabled={
-                                                                    working || blocked
-                                                                }
-                                                                onClick={() =>
-                                                                    clearManualAssignment(
-                                                                        item.id
-                                                                    )
-                                                                }
-                                                            >
-                                                                <Trash2 size={15} />
-                                                                Clear Position
-                                                            </button>
                                                         </div>
 
                                                         {isEditing && (
@@ -2883,56 +3077,7 @@ export default function MonthlyScheduling() {
                                                                     Position
                                                                 </h4>
 
-                                                                <div className="schedule-actions">
-                                                                    <button
-                                                                        type="button"
-                                                                        className={
-                                                                            assignmentMode ===
-                                                                                "lector"
-                                                                                ? "primary-button"
-                                                                                : "secondary-button"
-                                                                        }
-                                                                        onClick={() =>
-                                                                            setAssignmentMode(
-                                                                                "lector"
-                                                                            )
-                                                                        }
-                                                                        disabled={
-                                                                            working
-                                                                        }
-                                                                    >
-                                                                        <UsersRound
-                                                                            size={16}
-                                                                        />
-                                                                        Assign Lector
-                                                                    </button>
-
-                                                                    <button
-                                                                        type="button"
-                                                                        className={
-                                                                            assignmentMode ===
-                                                                                "text"
-                                                                                ? "primary-button"
-                                                                                : "secondary-button"
-                                                                        }
-                                                                        onClick={() =>
-                                                                            setAssignmentMode(
-                                                                                "text"
-                                                                            )
-                                                                        }
-                                                                        disabled={
-                                                                            working
-                                                                        }
-                                                                    >
-                                                                        <Pencil
-                                                                            size={16}
-                                                                        />
-                                                                        Custom Text
-                                                                    </button>
-                                                                </div>
-
-                                                                {assignmentMode ===
-                                                                    "lector" ? (
+                                                                {(
                                                                     <>
                                                                         <label>
                                                                             Select an
@@ -3011,87 +3156,6 @@ export default function MonthlyScheduling() {
                                                                             >
                                                                                 Save
                                                                                 Assignment
-                                                                            </button>
-                                                                        </div>
-                                                                    </>
-                                                                ) : (
-                                                                    <>
-                                                                        <label>
-                                                                            Enter Custom
-                                                                            Text
-                                                                        </label>
-
-                                                                        <input
-                                                                            type="text"
-                                                                            className="form-select"
-                                                                            value={
-                                                                                specialText
-                                                                            }
-                                                                            onChange={(
-                                                                                e
-                                                                            ) =>
-                                                                                setSpecialText(
-                                                                                    e
-                                                                                        .target
-                                                                                        .value
-                                                                                )
-                                                                            }
-                                                                            maxLength={
-                                                                                100
-                                                                            }
-                                                                            placeholder="e.g. Zone 1, Sunday School, Youth Group"
-                                                                            disabled={
-                                                                                working
-                                                                            }
-                                                                        />
-
-                                                                        <p className="field-hint">
-                                                                            Custom text
-                                                                            replaces
-                                                                            the lector
-                                                                            name in this
-                                                                            existing
-                                                                            position.
-                                                                            Maximum 100
-                                                                            characters.
-                                                                        </p>
-
-                                                                        <div className="schedule-actions">
-                                                                            <button
-                                                                                type="button"
-                                                                                className="primary-button"
-                                                                                disabled={
-                                                                                    working ||
-                                                                                    !specialText.trim()
-                                                                                }
-                                                                                onClick={() =>
-                                                                                    saveSpecialText(
-                                                                                        item.id
-                                                                                    )
-                                                                                }
-                                                                            >
-                                                                                Save
-                                                                                Custom
-                                                                                Text
-                                                                            </button>
-
-                                                                            <button
-                                                                                type="button"
-                                                                                className="secondary-button"
-                                                                                disabled={
-                                                                                    working ||
-                                                                                    !item.special_text
-                                                                                }
-                                                                                onClick={() =>
-                                                                                    saveSpecialText(
-                                                                                        item.id,
-                                                                                        ""
-                                                                                    )
-                                                                                }
-                                                                            >
-                                                                                Clear
-                                                                                Custom
-                                                                                Text
                                                                             </button>
                                                                         </div>
                                                                     </>

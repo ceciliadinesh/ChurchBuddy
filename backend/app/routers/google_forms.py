@@ -1,3 +1,4 @@
+
 import json
 import hmac
 import re
@@ -111,7 +112,7 @@ def parse_unavailable_dates(value: Any, month: int, year: int):
 # --------------------------------------------------
 
 def call_apps_script(payload: dict) -> dict:
-    """POST a JSON payload to the Apps Script web app and return its result."""
+    """POST JSON payload to Apps Script and return its result."""
     request = Request(
         settings.GOOGLE_APPS_SCRIPT_URL,
         data=json.dumps(payload).encode("utf-8"),
@@ -148,9 +149,6 @@ def set_google_form_accepting(monthly_form: MonthlyForm, accepting: bool):
     """
     Open or close the linked Google Form.
     Does nothing if no Google Form has been created yet.
-
-    Call this from the monthly-forms close/reopen endpoints BEFORE
-    changing is_open, so a Google failure leaves the database untouched.
     """
     if not monthly_form.google_form_id:
         return
@@ -233,7 +231,7 @@ def sync_google_form_status(
     monthly_form_id: int,
     db: Session = Depends(get_db)
 ):
-    """Make the Google Form's accepting-responses state match is_open."""
+    """Make Google Form accepting-responses state match is_open."""
     monthly_form = db.query(MonthlyForm).filter(
         MonthlyForm.id == monthly_form_id
     ).first()
@@ -245,7 +243,10 @@ def sync_google_form_status(
         )
 
     if not monthly_form.google_form_id:
-        return {"synced": False, "message": "No Google Form to update."}
+        return {
+            "synced": False,
+            "message": "No Google Form to update."
+        }
 
     accepting = bool(monthly_form.is_open)
     set_google_form_accepting(monthly_form, accepting)
@@ -307,8 +308,7 @@ def receive_google_form_submission(
 
     answers = payload.answers
 
-    # 3. Read lector name.
-    # EMAIL IS NOT USED FOR IDENTIFICATION.
+    # 3. Read and validate lector name.
     lector_name = str(
         answers.get("Lector Name", "")
     ).strip()
@@ -319,9 +319,20 @@ def receive_google_form_submission(
             detail="Please enter your name."
         )
 
+    # 4. Read and validate phone number.
+    phone = str(
+        answers.get("Phone Number", "")
+    ).strip()
+
+    if not phone:
+        raise HTTPException(
+            status_code=400,
+            detail="Please enter your phone number."
+        )
+
     submitted_name = normalize_name(lector_name)
 
-    # 4. Find this name among ALL lectors, including inactive lectors.
+    # 5. Find this name among all lectors.
     all_lectors = db.query(Lector).all()
 
     matching_lectors = [
@@ -342,24 +353,26 @@ def receive_google_form_submission(
         )
 
     if matching_lectors:
-        # Existing lector: activate automatically.
+        # Existing lector: activate and update phone.
         lector = matching_lectors[0]
         lector.is_active = True
+        lector.phone = phone
 
     else:
-        # New lector: create an active record automatically.
+        # New lector: create active record with phone.
         first_name, last_name = split_lector_name(lector_name)
 
         lector = Lector(
             first_name=first_name,
             last_name=last_name,
+            phone=phone,
             is_active=True
         )
 
         db.add(lector)
         db.flush()
 
-    # 5. Check whether this lector has already submitted for this month.
+    # 6. Check for duplicate monthly submission.
     existing_submission = db.query(
         AvailabilitySubmission
     ).filter(
@@ -378,7 +391,7 @@ def receive_google_form_submission(
             "monthly_form_id": monthly_form.id
         }
 
-    # 6. Validate availability type.
+    # 7. Validate availability type.
     day_availability = answers.get("Availability Type")
 
     allowed_availability = {
@@ -394,7 +407,7 @@ def receive_google_form_submission(
             detail="Invalid availability type."
         )
 
-    # 7. Validate Mass preference.
+    # 8. Validate Mass preference.
     mass_preference = answers.get("Mass Preference")
 
     if mass_preference not in {"Morning", "Evening", "Both"}:
@@ -403,7 +416,7 @@ def receive_google_form_submission(
             detail="Invalid Mass preference."
         )
 
-    # 8. Validate available weekdays.
+    # 9. Validate available weekdays.
     available_days = answers.get("Available Days") or []
 
     if not isinstance(available_days, list):
@@ -437,7 +450,7 @@ def receive_google_form_submission(
     if day_availability != "specific_days":
         available_days = []
 
-    # 9. Validate responsibilities.
+    # 10. Validate responsibilities.
     responsibilities = answers.get("Responsibilities") or []
 
     allowed_responsibilities = {
@@ -459,7 +472,7 @@ def receive_google_form_submission(
             detail="Select at least one valid responsibility."
         )
 
-    # 10. Validate unavailable date ranges.
+    # 11. Validate unavailable date ranges.
     try:
         unavailable_dates = parse_unavailable_dates(
             answers.get("Unavailable Date Ranges", ""),
@@ -475,7 +488,7 @@ def receive_google_form_submission(
 
     additional_requests = answers.get("Additional Requests") or ""
 
-    # 11. Save the lector's monthly availability.
+    # 12. Save monthly availability.
     new_submission = AvailabilitySubmission(
         lector_id=lector.id,
         monthly_form_id=monthly_form.id,
@@ -523,7 +536,7 @@ def receive_google_form_submission(
 
     return {
         "success": True,
-        "message": "Your availability has been saved successfully.",
+        "message": "Your availability and phone number have been saved successfully.",
         "submission_id": new_submission.id,
         "lector_id": lector.id,
         "lector_name": lector_name,
